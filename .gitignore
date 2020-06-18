@@ -1,0 +1,5 @@
+task/.DS_Store
+task/node_modules
+task/public/bundle*
+MixedRealityToolkit-Unity
+INNO-S20-SP
