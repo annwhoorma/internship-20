@@ -1,5 +1,6 @@
-task/.DS_Store
-task/node_modules
-task/public/bundle*
+3d-display/.DS_Store
+3d-display/node_modules
+3d-display/public/bundle*
 MixedRealityToolkit-Unity
 INNO-S20-SP
+3d-displayOLD
