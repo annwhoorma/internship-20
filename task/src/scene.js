@@ -2,8 +2,10 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
+// import DracoDecoderModule from "./draco/draco_decoder";
 
-export function init() {
+export function init(data) {
+    console.log("init called");
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('gray');
     var camera = new THREE.PerspectiveCamera( 60, 2, 0.1, 1000 );
@@ -14,14 +16,13 @@ export function init() {
     var controls = new OrbitControls(camera, renderer.domElement);
     
     var dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath('./draco/gltf/');
-
     var loader = new GLTFLoader();
+    dracoLoader.setDecoderConfig(DracoDecoderModule);
     loader.setDRACOLoader(dracoLoader);
 
     function load3DObject(scene, loader, url) {
         const onLoad = (gltf) => {
-            model = gltf.scene.children[0];
+            var model = gltf.scene.children[0];
             scene.add(model);
         };
         const onProgress = () => { };
@@ -32,10 +33,10 @@ export function init() {
         loader.load(url, gltf => onLoad(gltf), onProgress, onError);
     }
 
-    var url = "./../models/Lantern.glb";
-    load3DObject(scene, loader, url);
+    var url = data;
+    // load3DObject(scene, loader, url);
 
-    loader.load('/home/whoorma/Documents/internship20/task/models/ferrari.glb', function (gltf) {
+    loader.load(data, function (gltf) {
 
             var carModel = gltf.scene.children[0];
 
