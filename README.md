@@ -1,3 +1,3 @@
 # internship-20
 
-Hoping that this repository will grow 
+Navigate to ./3d-display and follow the instructions there
