@@ -8,10 +8,11 @@ export function init(data) {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('gray');
     var camera = new THREE.PerspectiveCamera( 60, 2, 0.1, 1000 );
-    camera.position.set(2, 3, 2);
+    camera.position.set(1, 1, 1);
+    
     var lights = [];
     for (let i = 0; i < 4; i++){
-        lights[i] = new THREE.DirectionalLight();
+        lights[i] = new THREE.DirectionalLight(0xffffff, 0.55);
     }
     lights[0].position.set(100, 100, 100);
     lights[1].position.set(-100, 100, -100);
@@ -20,6 +21,7 @@ export function init(data) {
     for (let i = 0; i < 4; i++){
         scene.add(lights[i]);
     }
+
     var renderer = new THREE.WebGLRenderer();
     renderer.setSize(window.innerWidth*0.987, window.innerHeight*2.7/3);
     document.body.appendChild(renderer.domElement);
@@ -37,46 +39,56 @@ export function init(data) {
     dracoLoader.setDecoderConfig({type: 'js'});
     loader.setDRACOLoader(dracoLoader);
 
-    function load3DObject(scene, loader, url) {
-        const onLoad = (gltf) => {
-            var model = gltf.scene.children[0];
-            scene.add(model);
-        };
-        const onProgress = () => { };
-        const onError = (errorMessage) => {
-            console.log(errorMessage);
-        };
+    // function load3DObject(scene, loader, url) {
+    //     const onLoad = (gltf) => {
+    //         var model = gltf.scene.children[0];
+    //         scene.add(model);
+    //     };
+    //     const onProgress = () => { };
+    //     const onError = (errorMessage) => {
+    //         console.log(errorMessage);
+    //     };
 
-        loader.load(url, gltf => onLoad(gltf), onProgress, onError);
-    }
+    //     loader.load(url, gltf => onLoad(gltf), onProgress, onError);
+    // }
 
-    var url = data;
-    load3DObject(scene, loader, url);
+    // var url = data;
+    // load3DObject(scene, loader, url);
 
-    // loader.load(data, function (gltf) {
 
-    //         var carModel = gltf.scene.children[0];
+    // materials 
+    var bodyMaterial = new THREE.MeshPhysicalMaterial( {
+        color: 0x000333, metalness: 1.0, roughness: 0.5, clearcoat: 0.02, clearcoatRoughness: 0.01
+    } );
 
-    //         // carModel.getObjectByName( 'body' ).material = bodyMaterial;
+    var detailsMaterial = new THREE.MeshStandardMaterial( {
+        color: 0xffffff, metalness: 1.0, roughness: 0.5
+    } );
 
-    //         // carModel.getObjectByName( 'rim_fl' ).material = detailsMaterial;
-    //         // carModel.getObjectByName( 'rim_fr' ).material = detailsMaterial;
-    //         // carModel.getObjectByName( 'rim_rr' ).material = detailsMaterial;
-    //         // carModel.getObjectByName( 'rim_rl' ).material = detailsMaterial;
-    //         // carModel.getObjectByName( 'trim' ).material = detailsMaterial;
+    loader.load(data, function (gltf) {
 
-    //         // carModel.getObjectByName( 'glass' ).material = glassMaterial;
+            var carModel = gltf.scene.children[0];
 
-    //         // wheels.push(
-    //         //     carModel.getObjectByName( 'wheel_fl' ),
-    //         //     carModel.getObjectByName( 'wheel_fr' ),
-    //         //     carModel.getObjectByName( 'wheel_rl' ),
-    //         //     carModel.getObjectByName( 'wheel_rr' )
-    //         // );
+            carModel.getObjectByName( 'body' ).material = bodyMaterial;
 
-    //         scene.add( carModel );
+            carModel.getObjectByName( 'rim_fl' ).material = detailsMaterial;
+            carModel.getObjectByName( 'rim_fr' ).material = detailsMaterial;
+            carModel.getObjectByName( 'rim_rr' ).material = detailsMaterial;
+            carModel.getObjectByName( 'rim_rl' ).material = detailsMaterial;
+            carModel.getObjectByName( 'trim' ).material = detailsMaterial;
 
-    //     } );
+            carModel.getObjectByName( 'glass' ).material = glassMaterial;
+
+            wheels.push(
+                carModel.getObjectByName( 'wheel_fl' ),
+                carModel.getObjectByName( 'wheel_fr' ),
+                carModel.getObjectByName( 'wheel_rl' ),
+                carModel.getObjectByName( 'wheel_rr' )
+            );
+
+            scene.add( carModel );
+
+        } );
 
 
     function animate() {
