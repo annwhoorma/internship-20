@@ -1,0 +1,381 @@
+{
+  "accessors": [
+    {
+      "bufferView": 0,
+      "byteOffset": 0,
+      "componentType": 5123,
+      "count": 66759,
+      "type": "SCALAR",
+      "max": [
+        11356
+      ],
+      "min": [
+        0
+      ]
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 0,
+      "componentType": 5126,
+      "count": 11357,
+      "type": "VEC3",
+      "max": [
+        14.740797996521,
+        -144.536819458008,
+        181.234924316406
+      ],
+      "min": [
+        -81.6191024780273,
+        -285.204528808594,
+        122.59016418457
+      ]
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 133520,
+      "componentType": 5123,
+      "count": 65949,
+      "type": "SCALAR",
+      "max": [
+        11047
+      ],
+      "min": [
+        0
+      ]
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 0,
+      "componentType": 5126,
+      "count": 11048,
+      "type": "VEC3",
+      "max": [
+        -39.6036682128906,
+        -176.928192138672,
+        175.488174438477
+      ],
+      "min": [
+        -112.472030639648,
+        -282.226501464844,
+        91.8093566894531
+      ]
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 265420,
+      "componentType": 5123,
+      "count": 23337,
+      "type": "SCALAR",
+      "max": [
+        3883
+      ],
+      "min": [
+        0
+      ]
+    },
+    {
+      "bufferView": 3,
+      "byteOffset": 0,
+      "componentType": 5126,
+      "count": 3884,
+      "type": "VEC3",
+      "max": [
+        -66.6384582519531,
+        -179.881423950195,
+        152.513931274414
+      ],
+      "min": [
+        -100.588478088379,
+        -214.828796386719,
+        117.315063476563
+      ]
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 312096,
+      "componentType": 5123,
+      "count": 40653,
+      "type": "SCALAR",
+      "max": [
+        5834
+      ],
+      "min": [
+        0
+      ]
+    },
+    {
+      "bufferView": 4,
+      "byteOffset": 0,
+      "componentType": 5126,
+      "count": 5835,
+      "type": "VEC3",
+      "max": [
+        -11.1508026123047,
+        -158.475570678711,
+        181.752532958984
+      ],
+      "min": [
+        -76.5291213989258,
+        -295.152984619141,
+        125.349449157715
+      ]
+    }
+  ],
+  "asset": {
+    "generator": "Aspose.3D 20.2.1",
+    "version": "2.0"
+  },
+  "buffers": [
+    {
+      "uri": "buffer.bin",
+      "byteLength": 778912
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 393404,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 393408,
+      "byteLength": 136284,
+      "byteStride": 12,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 529696,
+      "byteLength": 132576,
+      "byteStride": 12,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 662276,
+      "byteLength": 46608,
+      "byteStride": 12,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 708888,
+      "byteLength": 70020,
+      "byteStride": 12,
+      "target": 34962
+    }
+  ],
+  "materials": [
+    {
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          1,
+          0,
+          0.25,
+          1
+        ],
+        "metallicFactor": 0,
+        "roughnessFactor": 0.552786409854889
+      },
+      "emissiveFactor": [
+        0,
+        0,
+        0
+      ],
+      "alphaMode": "OPAQUE",
+      "doubleSided": true
+    },
+    {
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "metallicFactor": 1,
+        "roughnessFactor": 1
+      },
+      "emissiveFactor": [
+        0,
+        0,
+        0
+      ],
+      "alphaMode": "OPAQUE",
+      "doubleSided": true
+    },
+    {
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          1,
+          0.549000024795532,
+          0.934800028800964,
+          1
+        ],
+        "metallicFactor": 0,
+        "roughnessFactor": 0.552786409854889
+      },
+      "emissiveFactor": [
+        0,
+        0,
+        0
+      ],
+      "alphaMode": "OPAQUE",
+      "doubleSided": true
+    },
+    {
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0,
+          0.374700009822845,
+          1,
+          1
+        ],
+        "metallicFactor": 0,
+        "roughnessFactor": 0.552786409854889
+      },
+      "emissiveFactor": [
+        0,
+        0,
+        0
+      ],
+      "alphaMode": "OPAQUE",
+      "doubleSided": true
+    }
+  ],
+  "meshes": [
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 1
+          },
+          "indices": 0,
+          "material": 0,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 3
+          },
+          "indices": 2,
+          "material": 1,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 5
+          },
+          "indices": 4,
+          "material": 2,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 7
+          },
+          "indices": 6,
+          "material": 3,
+          "mode": 4
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 3,
+      "name": "surface_vein_low"
+    },
+    {
+      "children": [
+        0
+      ],
+      "mesh": 2,
+      "name": "surface_neoplasm_low"
+    },
+    {
+      "children": [
+        1
+      ],
+      "mesh": 1,
+      "name": "surface_kidney_low"
+    },
+    {
+      "children": [
+        2
+      ],
+      "mesh": 0,
+      "name": "surface_artery_low"
+    },
+    {
+      "children": [
+        3
+      ],
+      "matrix": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        42.8853721618652,
+        223,
+        -145,
+        1
+      ],
+      "name": "Kindney_V2"
+    },
+    {
+      "children": [
+        4
+      ],
+      "matrix": [
+        0.00100000004749745,
+        0,
+        0,
+        0,
+        0,
+        -1.34358862866754e-10,
+        0.0010000000132689,
+        0,
+        0,
+        -0.0010000000132689,
+        -1.34358862866754e-10,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "name": "Kind"
+    }
+  ],
+  "scene": 0,
+  "scenes": [
+    {
+      "nodes": [
+        5
+      ]
+    }
+  ]
+}

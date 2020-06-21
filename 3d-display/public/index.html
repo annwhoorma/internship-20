@@ -3,10 +3,24 @@
 	<head>
 		<meta charset="utf-8">
 		<title>Dobryi vecher</title>
+		<style>
+			.c1 {
+				margin-left: 200px;
+			}
+			.c2 {
+				margin-top: 5px;
+				margin-bottom: 10px;
+			}
+		</style>
 	</head>
 	<body>
 		<input type="file" id="file-selector" accept=".glb" change="onChange" multiple>
-		<input type="button" id="file-submission" value="submit">
+		<input type="button" id="file-submission" class="c2" value="submit">
+		<label class="c1" for="select-object">Select a mesh</label>
+		<select id="selection-list">
+		</select> 
+		<input id="any-color" class="c2" type="color" value="#000000"></input>
+
 		<script src="./bundle.js"></script>
 	</body>
 </html>	
