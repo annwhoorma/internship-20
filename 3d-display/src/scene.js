@@ -1,8 +1,8 @@
-import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
-import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
-import { Queue } from "./Queue";
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { Queue } from './Queue';
 
 var scene, camera, renderer, controls, grid;
 var lights = new Array(8);
@@ -34,7 +34,7 @@ export function init() {
     }
 
     renderer = new THREE.WebGLRenderer();
-    renderer.setSize(window.innerWidth*0.8, window.innerHeight*2.7/3);
+    renderer.setSize(window.innerWidth*0.7, window.innerHeight*0.85);
     document.body.appendChild(renderer.domElement);
     controls = new OrbitControls(camera, renderer.domElement);
 
@@ -68,25 +68,27 @@ export function display_kind(data) {
 }
 
 function addToList(list){
-    var menu = document.getElementById("selection-list");
+    var menu = document.getElementById('selection-list');
     list.forEach(l => {
-        console.log(l.obj.name);
-        let option = document.createElement("option");
-        // option.text = l.obj.name + " (" + l.obj.type + ")";
-        option.text = l.obj.name;
-        menu.add(option);
+        if (l.obj.type == 'Mesh') {
+            let option = document.createElement('option');
+            option.text = l.obj.name + ' (' + l.obj.type + ')';
+            option.text = l.obj.name;
+            menu.add(option);
+        }
     });
 }
 
 export function change_color(mesh_name, color) {
-    // kind_model.getObjectByName('surface_kidney_low').material.blending = THREE.AdditiveBlending;
     kind_model.getObjectByName(mesh_name).material.color.set(color);
-    // structure.forEach(item =>{
-    //     if (item.obj.isMesh){
-    //         console.log(item.obj.name, item.obj.type);
-    //         item.obj.material.color.set(color);
-    //     }
-    // });
+}
+
+export function change_transparency(mesh_name, value) {
+    kind_model.getObjectByName(mesh_name).material.alphaTest = value;
+    // console.log(kind_model.getObjectByName(mesh_name).material.opacity);
+    // kind_model.getObjectByName(mesh_name).material.transparency = true;
+    // kind_model.getObjectByName(mesh_name).material.opacity = value;
+    // console.log("----", kind_model.getObjectByName(mesh_name).material.opacity);
 }
 
 function bfs(model) {
@@ -98,10 +100,7 @@ function bfs(model) {
     
     while (queue.isEmpty() == false) {
         let c = queue.dequeue();
-        if (c.obj.children.length == 0) {
-            list.push(new Node(c, c.obj.parent));
-        }
-        else{
+        if (c.obj.children.length > 0) {
             c.obj.children.forEach(child => {
                 queue.enqueue(new Node(child, c.obj));
                 list.push(new Node(child, c.obj));
