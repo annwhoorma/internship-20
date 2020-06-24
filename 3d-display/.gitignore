@@ -1,5 +1,4 @@
 node_modules/
 public/bundle.*
-docs/bundle.*
 src/trash.js
 models/
