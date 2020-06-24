@@ -1,13 +1,17 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { Queue } from './Queue';
+import { Vector3 } from 'three';
 
 var scene, camera, renderer, controls, grid;
 var lights = new Array(8);
-var kind_model;
+var model;
 var structure = [];
+var structure_dict = new Map();
+var init_scale;
 
 export function init() {
     // create the gray scene
@@ -16,7 +20,7 @@ export function init() {
 
     // create the camera
     camera = new THREE.PerspectiveCamera( 60, 2, 0.1, 1000 );
-    camera.position.set(0.5, 0.5, 0.5);
+    camera.position.set(0.4, 0.4, 0.6);
     
     for (let i = 0; i < 8; i++){
         lights[i] = new THREE.DirectionalLight(0xffffff, 0.55);
@@ -34,8 +38,13 @@ export function init() {
     }
 
     renderer = new THREE.WebGLRenderer();
-    renderer.setSize(window.innerWidth*0.7, window.innerHeight*0.85);
-    document.body.appendChild(renderer.domElement);
+    renderer.physicallyCorrectLights = true;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+
+    let container = document.getElementById('scene-container');
+    renderer.setSize(container.offsetWidth, container.offsetHeight);
+    container.appendChild(renderer.domElement);
+
     controls = new OrbitControls(camera, renderer.domElement);
 
     grid = new THREE.GridHelper( 100, 40, 0x000000, 0x000000 );
@@ -60,35 +69,88 @@ export function display_kind(data) {
     gltfloader.setDRACOLoader(dracoLoader);
 
     gltfloader.load(data, function (gltf) {
-        kind_model = gltf.scene.children[0];
-        scene.add(kind_model);
-        structure = bfs(kind_model);
-        addToList(structure);
+        model = gltf.scene.children[0];
+        scene.add(model);
+        structure = bfs(model);
+        addToMenu(structure);
+        init_scale = model.scale.clone();
     });
 }
 
-function addToList(list){
+function addToMenu(list){
     var menu = document.getElementById('selection-list');
+    createDictionary(list);
     list.forEach(l => {
-        if (l.obj.type == 'Mesh') {
-            let option = document.createElement('option');
-            option.text = l.obj.name + ' (' + l.obj.type + ')';
-            option.text = l.obj.name;
-            menu.add(option);
-        }
+        let option = document.createElement('option');
+        option.text = l.obj.name + ' (' + l.obj.type + ')', l.obj.name;
+        menu.add(option);   
     });
 }
 
-export function change_color(mesh_name, color) {
-    kind_model.getObjectByName(mesh_name).material.color.set(color);
+function createDictionary(list) {
+    list.forEach(l =>{
+        structure_dict.set(l.obj.name + ' (' + l.obj.type + ')', l.obj.name);
+    });
 }
 
-export function change_transparency(mesh_name, value) {
-    kind_model.getObjectByName(mesh_name).material.alphaTest = value;
-    // console.log(kind_model.getObjectByName(mesh_name).material.opacity);
-    // kind_model.getObjectByName(mesh_name).material.transparency = true;
-    // kind_model.getObjectByName(mesh_name).material.opacity = value;
-    // console.log("----", kind_model.getObjectByName(mesh_name).material.opacity);
+export function change_color(name, color) {
+    model.getObjectByName(structure_dict.get(name)).material.color.set(color);
+}
+
+export function change_scale(value) {
+    console.log("before: ", init_scale, value)
+    let x = init_scale.x*parseFloat(value);
+    let y = init_scale.y*parseFloat(value);
+    let z = init_scale.z*parseFloat(value);
+    model.scale.set(x, y, z);
+}
+
+export function change_transparency(name, value) {
+    let obj_name = structure_dict.get(name);
+    if (obj_name == 'all'){
+        structure.forEach(l => {
+            if (l.obj.type == 'Mesh'){
+                l.obj.material.transparent = true;
+                l.obj.material.opacity = 1 - value;
+            }
+        });
+    }
+    else{
+        model.getObjectByName(obj_name).material.transparent = value > 0 ? true : false;
+        model.getObjectByName(obj_name).material.opacity = 1 - value;
+    }
+}
+
+
+export function exportGLTF(name) {
+    var gltfExporter = new GLTFExporter();
+
+    gltfExporter.parse(model, function ( result ) {
+        if ( result instanceof ArrayBuffer ) {
+            saveArrayBuffer(result, name+'.glb');
+        } else {
+            var output = JSON.stringify(result, null, 2);
+            saveString(output, name+'.glb');
+        }
+    }, {binary: true} );
+}
+
+var link = document.createElement('a');
+link.style.display = 'none';
+document.body.appendChild(link); // Firefox workaround, see #6594
+
+function save(blob, filename) {
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+}
+
+function saveString(text, filename) {
+    save(new Blob([text], {type: 'text/plain'}), filename);
+}
+
+function saveArrayBuffer(buffer,filename) {
+    save(new Blob([buffer], {type: 'application/octet-stream'}), filename);
 }
 
 function bfs(model) {
