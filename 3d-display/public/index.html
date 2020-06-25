@@ -14,9 +14,10 @@
 			}
 			.container{
 				float: right;
-				width: 1050px;
-				height: 635px;
-				margin: 10px;
+				width: 1030px;
+				height: 570px;
+				margin: 15px;
+				margin-right: 25px;
 				margin-left: 0px;
 			}
 			.picker {
@@ -55,7 +56,7 @@
 
 			<span class='part'>
 				<div>
-					<label for='scale-value' style='font-family:Arial, Helvetica, sans-serif; font-size:15px'>Object's scale</label>
+					<label for='scale-value' style='font-family:Arial, Helvetica, sans-serif; font-size:15px'>Scaling factor</label>
 					<input type='number' class='small' id='scale-value' min='0.01' max='10' value='1' step='0.01'>
 				</div>
 			</span>
@@ -75,6 +76,7 @@
 			<input type='button' class='take-all' id='save-file' value='Save modified file'>
 		</span>
 		<div class='container' id='scene-container'></div>
+		<!-- <canvas class='container' id='scene-container'> -->
 
 		<script src='./bundle.js'></script>
 	</body>
