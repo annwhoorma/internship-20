@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset='utf-8'>
+		<title>Dobryi vecher</title>
+		<style>
+			.menuleftcontent{
+				float: left;
+				margin: 8px;
+				width: 230px;
+			}
+			.dropdown{
+				width: 100%;
+			}
+			.container{
+				float: right;
+				width: 1050px;
+				height: 635px;
+				margin: 10px;
+				margin-left: 0px;
+			}
+			.picker {
+				display: inline-block;
+				margin: 5px;
+				box-shadow: 0 2px 2px 0 rgba(0,0,0,0.16), 0 0 0 1px rgba(3, 1, 1, 0.08);
+			}
+			.part {
+				display: inline-block;
+				padding: 5px 10px 5px;
+				width: 210px;
+				margin: 5px;
+				box-shadow: 2px 2px 2px 2px rgba(0,0,0,0.16), 1px 1px 1px 1px rgba(3, 1, 1, 0.08);
+			}
+			.take-all {
+				width: 100%;
+				height: 25px;
+				margin: 5px;
+				box-shadow: 2px 2px 2px 2px rgba(0,0,0,0.16), 1px 1px 1px 1px rgba(3, 1, 1, 0.08);
+			}
+			.small {
+				margin: 3px;
+				width: 45px;
+			}
+			.submit-button {
+				margin-top: 4px;
+			}
+		</style>
+	</head>
+	<body>
+		<span class='menuleftcontent'>
+			<span class='part'>
+				<input type='file' id='file-selector' accept='.glb' change='onChange' multiple>
+				<input type='button' class='submit-button' id='file-submission' value='Submit'>
+			</span>
+
+			<span class='part'>
+				<select id='selection-list' class='dropdown'></select> 
+				<div style='margin-top:3px'>
+					<label for='transparency-value' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Transparency level</label>
+					<input type='number' class='small' id='transparency-value' min='0' max='1' value='0' step='0.01'>
+				</div>
+			</span>
+
+			<span class='part'>
+				<div>
+					<label for='scale-value' style='font-family:Arial, Helvetica, sans-serif; font-size:15px'>Scale</label>
+					<input type='number' class='small' id='scale-value' min='0.01' max='10' value='1' step='0.01'>
+				</div>
+			</span>
+
+			<span class='picker' 
+				acp-color='#EFE9E7'>
+			</span>
+
+			<input type='button' class='take-all' id='save-file' value='Save modified file'>
+		</span>
+		<div class='container' id='scene-container'></div>
+
+		<script src='./bundle.js'></script>
+	</body>
+</html>	
