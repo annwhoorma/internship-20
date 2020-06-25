@@ -57339,10 +57339,10 @@
 
 	    // create the camera
 	    camera = new PerspectiveCamera( 60, 2, 0.1, 1000 );
-	    camera.position.set(0.4, 0.4, 0.6);
+	    camera.position.set(2, 4, 5);
 	    
 	    for (let i = 0; i < 8; i++){
-	        lights[i] = new DirectionalLight(0xffffff, 0.55);
+	        lights[i] = new DirectionalLight(0xffffff, 0.9);
 	    }
 	    lights[0].position.set(100, 100, 100);
 	    lights[1].position.set(-100, 100, -100);
@@ -57388,7 +57388,7 @@
 	    gltfloader.setDRACOLoader(dracoLoader);
 
 	    gltfloader.load(data, function (gltf) {
-	        model = gltf.scene.children[0];
+	        model = gltf.scene;
 	        scene.add(model);
 	        structure = bfs(model);
 	        addToMenu(structure);
@@ -57408,16 +57408,15 @@
 
 	function createDictionary(list) {
 	    list.forEach(l =>{
-	        structure_dict.set(l.obj.name + ' (' + l.obj.type + ')', l.obj.name);
+	        structure_dict.set(l.obj.name + ' (' + l.obj.type + ')', l.obj.id);
 	    });
 	}
 
 	function change_color(name, color) {
-	    model.getObjectByName(structure_dict.get(name)).material.color.set(color);
+	    model.getObjectById(structure_dict.get(name)).material.color.set(color);
 	}
 
 	function change_scale(value) {
-	    console.log("before: ", init_scale, value);
 	    let x = init_scale.x*parseFloat(value);
 	    let y = init_scale.y*parseFloat(value);
 	    let z = init_scale.z*parseFloat(value);
@@ -57425,20 +57424,23 @@
 	}
 
 	function change_transparency(name, value) {
-	    let obj_name = structure_dict.get(name);
-	    if (obj_name == 'all'){
-	        structure.forEach(l => {
-	            if (l.obj.type == 'Mesh'){
-	                l.obj.material.transparent = true;
-	                l.obj.material.opacity = 1 - value;
-	            }
-	        });
-	    }
-	    else {
-	        model.getObjectByName(obj_name).material.transparent = value > 0 ? true : false;
-	        model.getObjectByName(obj_name).material.opacity = 1 - value;
-	    }
+	    let obj_id = structure_dict.get(name);
+	    model.getObjectById(obj_id).material.transparent = value > 0 ? true : false;
+	    model.getObjectById(obj_id).material.opacity = 1 - value;
 	}
+
+	function getTrancparencyValue(name) {
+	    let obj_id = structure_dict.get(name);
+	    return (1 - model.getObjectById(obj_id).material.opacity).toFixed(2);
+	}
+
+
+
+
+
+
+
+
 
 
 	function exportGLTF(name) {
@@ -57503,7 +57505,10 @@
 	document.getElementById('file-submission').addEventListener('click', function() {
 	    var file = document.getElementById('file-selector').files[0];
 	    display_kind(URL.createObjectURL(file, { type: 'model/gltf-binary' }));
-	    document.getElementById('transparency-value');
+	});
+
+	document.getElementById('selection-list').addEventListener('click', function() {
+	    document.getElementById('transparency-value').value = getTrancparencyValue(this.value);
 	});
 
 	acolorpicker.from('.picker').on('change', (picker, color) => {
