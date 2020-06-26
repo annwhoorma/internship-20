@@ -11,5 +11,4 @@ npm run dev
 
 #### Testing
 
-To test, you can navigate to *./models/* and find some interesting *.glb* files
-
+To test, you should use files with *.glb* extension
