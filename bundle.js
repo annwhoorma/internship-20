@@ -53197,6 +53197,1850 @@
 	} )();
 
 	/**
+	 * @author Don McCurdy / https://www.donmccurdy.com
+	 */
+
+	var DRACOLoader = function ( manager ) {
+
+		Loader.call( this, manager );
+
+		this.decoderPath = '';
+		this.decoderConfig = {};
+		this.decoderBinary = null;
+		this.decoderPending = null;
+
+		this.workerLimit = 4;
+		this.workerPool = [];
+		this.workerNextTaskID = 1;
+		this.workerSourceURL = '';
+
+		this.defaultAttributeIDs = {
+			position: 'POSITION',
+			normal: 'NORMAL',
+			color: 'COLOR',
+			uv: 'TEX_COORD'
+		};
+		this.defaultAttributeTypes = {
+			position: 'Float32Array',
+			normal: 'Float32Array',
+			color: 'Float32Array',
+			uv: 'Float32Array'
+		};
+
+	};
+
+	DRACOLoader.prototype = Object.assign( Object.create( Loader.prototype ), {
+
+		constructor: DRACOLoader,
+
+		setDecoderPath: function ( path ) {
+
+			this.decoderPath = path;
+
+			return this;
+
+		},
+
+		setDecoderConfig: function ( config ) {
+
+			this.decoderConfig = config;
+
+			return this;
+
+		},
+
+		setWorkerLimit: function ( workerLimit ) {
+
+			this.workerLimit = workerLimit;
+
+			return this;
+
+		},
+
+		/** @deprecated */
+		setVerbosity: function () {
+
+			console.warn( 'THREE.DRACOLoader: The .setVerbosity() method has been removed.' );
+
+		},
+
+		/** @deprecated */
+		setDrawMode: function () {
+
+			console.warn( 'THREE.DRACOLoader: The .setDrawMode() method has been removed.' );
+
+		},
+
+		/** @deprecated */
+		setSkipDequantization: function () {
+
+			console.warn( 'THREE.DRACOLoader: The .setSkipDequantization() method has been removed.' );
+
+		},
+
+		load: function ( url, onLoad, onProgress, onError ) {
+
+			var loader = new FileLoader( this.manager );
+
+			loader.setPath( this.path );
+			loader.setResponseType( 'arraybuffer' );
+
+			if ( this.crossOrigin === 'use-credentials' ) {
+
+				loader.setWithCredentials( true );
+
+			}
+
+			loader.load( url, ( buffer ) => {
+
+				var taskConfig = {
+					attributeIDs: this.defaultAttributeIDs,
+					attributeTypes: this.defaultAttributeTypes,
+					useUniqueIDs: false
+				};
+
+				this.decodeGeometry( buffer, taskConfig )
+					.then( onLoad )
+					.catch( onError );
+
+			}, onProgress, onError );
+
+		},
+
+		/** @deprecated Kept for backward-compatibility with previous DRACOLoader versions. */
+		decodeDracoFile: function ( buffer, callback, attributeIDs, attributeTypes ) {
+
+			var taskConfig = {
+				attributeIDs: attributeIDs || this.defaultAttributeIDs,
+				attributeTypes: attributeTypes || this.defaultAttributeTypes,
+				useUniqueIDs: !! attributeIDs
+			};
+
+			this.decodeGeometry( buffer, taskConfig ).then( callback );
+
+		},
+
+		decodeGeometry: function ( buffer, taskConfig ) {
+
+			// TODO: For backward-compatibility, support 'attributeTypes' objects containing
+			// references (rather than names) to typed array constructors. These must be
+			// serialized before sending them to the worker.
+			for ( var attribute in taskConfig.attributeTypes ) {
+
+				var type = taskConfig.attributeTypes[ attribute ];
+
+				if ( type.BYTES_PER_ELEMENT !== undefined ) {
+
+					taskConfig.attributeTypes[ attribute ] = type.name;
+
+				}
+
+			}
+
+			//
+
+			var taskKey = JSON.stringify( taskConfig );
+
+			// Check for an existing task using this buffer. A transferred buffer cannot be transferred
+			// again from this thread.
+			if ( DRACOLoader.taskCache.has( buffer ) ) {
+
+				var cachedTask = DRACOLoader.taskCache.get( buffer );
+
+				if ( cachedTask.key === taskKey ) {
+
+					return cachedTask.promise;
+
+				} else if ( buffer.byteLength === 0 ) {
+
+					// Technically, it would be possible to wait for the previous task to complete,
+					// transfer the buffer back, and decode again with the second configuration. That
+					// is complex, and I don't know of any reason to decode a Draco buffer twice in
+					// different ways, so this is left unimplemented.
+					throw new Error(
+
+						'THREE.DRACOLoader: Unable to re-decode a buffer with different ' +
+						'settings. Buffer has already been transferred.'
+
+					);
+
+				}
+
+			}
+
+			//
+
+			var worker;
+			var taskID = this.workerNextTaskID ++;
+			var taskCost = buffer.byteLength;
+
+			// Obtain a worker and assign a task, and construct a geometry instance
+			// when the task completes.
+			var geometryPending = this._getWorker( taskID, taskCost )
+				.then( ( _worker ) => {
+
+					worker = _worker;
+
+					return new Promise( ( resolve, reject ) => {
+
+						worker._callbacks[ taskID ] = { resolve, reject };
+
+						worker.postMessage( { type: 'decode', id: taskID, taskConfig, buffer }, [ buffer ] );
+
+						// this.debug();
+
+					} );
+
+				} )
+				.then( ( message ) => this._createGeometry( message.geometry ) );
+
+			// Remove task from the task list.
+			// Note: replaced '.finally()' with '.catch().then()' block - iOS 11 support (#19416)
+			geometryPending
+				.catch( () => true )
+				.then( () => {
+
+					if ( worker && taskID ) {
+
+						this._releaseTask( worker, taskID );
+
+						// this.debug();
+
+					}
+
+				} );
+
+			// Cache the task result.
+			DRACOLoader.taskCache.set( buffer, {
+
+				key: taskKey,
+				promise: geometryPending
+
+			} );
+
+			return geometryPending;
+
+		},
+
+		_createGeometry: function ( geometryData ) {
+
+			var geometry = new BufferGeometry();
+
+			if ( geometryData.index ) {
+
+				geometry.setIndex( new BufferAttribute( geometryData.index.array, 1 ) );
+
+			}
+
+			for ( var i = 0; i < geometryData.attributes.length; i ++ ) {
+
+				var attribute = geometryData.attributes[ i ];
+				var name = attribute.name;
+				var array = attribute.array;
+				var itemSize = attribute.itemSize;
+
+				geometry.setAttribute( name, new BufferAttribute( array, itemSize ) );
+
+			}
+
+			return geometry;
+
+		},
+
+		_loadLibrary: function ( url, responseType ) {
+
+			var loader = new FileLoader( this.manager );
+			loader.setPath( this.decoderPath );
+			loader.setResponseType( responseType );
+
+			return new Promise( ( resolve, reject ) => {
+
+				loader.load( url, resolve, undefined, reject );
+
+			} );
+
+		},
+
+		preload: function () {
+
+			this._initDecoder();
+
+			return this;
+
+		},
+
+		_initDecoder: function () {
+
+			if ( this.decoderPending ) return this.decoderPending;
+
+			var useJS = typeof WebAssembly !== 'object' || this.decoderConfig.type === 'js';
+			var librariesPending = [];
+
+			if ( useJS ) {
+
+				librariesPending.push( this._loadLibrary( 'draco_decoder.js', 'text' ) );
+
+			} else {
+
+				librariesPending.push( this._loadLibrary( 'draco_wasm_wrapper.js', 'text' ) );
+				librariesPending.push( this._loadLibrary( 'draco_decoder.wasm', 'arraybuffer' ) );
+
+			}
+
+			this.decoderPending = Promise.all( librariesPending )
+				.then( ( libraries ) => {
+
+					var jsContent = libraries[ 0 ];
+
+					if ( ! useJS ) {
+
+						this.decoderConfig.wasmBinary = libraries[ 1 ];
+
+					}
+
+					var fn = DRACOLoader.DRACOWorker.toString();
+
+					var body = [
+						'/* draco decoder */',
+						jsContent,
+						'',
+						'/* worker */',
+						fn.substring( fn.indexOf( '{' ) + 1, fn.lastIndexOf( '}' ) )
+					].join( '\n' );
+
+					this.workerSourceURL = URL.createObjectURL( new Blob( [ body ] ) );
+
+				} );
+
+			return this.decoderPending;
+
+		},
+
+		_getWorker: function ( taskID, taskCost ) {
+
+			return this._initDecoder().then( () => {
+
+				if ( this.workerPool.length < this.workerLimit ) {
+
+					var worker = new Worker( this.workerSourceURL );
+
+					worker._callbacks = {};
+					worker._taskCosts = {};
+					worker._taskLoad = 0;
+
+					worker.postMessage( { type: 'init', decoderConfig: this.decoderConfig } );
+
+					worker.onmessage = function ( e ) {
+
+						var message = e.data;
+
+						switch ( message.type ) {
+
+							case 'decode':
+								worker._callbacks[ message.id ].resolve( message );
+								break;
+
+							case 'error':
+								worker._callbacks[ message.id ].reject( message );
+								break;
+
+							default:
+								console.error( 'THREE.DRACOLoader: Unexpected message, "' + message.type + '"' );
+
+						}
+
+					};
+
+					this.workerPool.push( worker );
+
+				} else {
+
+					this.workerPool.sort( function ( a, b ) {
+
+						return a._taskLoad > b._taskLoad ? - 1 : 1;
+
+					} );
+
+				}
+
+				var worker = this.workerPool[ this.workerPool.length - 1 ];
+				worker._taskCosts[ taskID ] = taskCost;
+				worker._taskLoad += taskCost;
+				return worker;
+
+			} );
+
+		},
+
+		_releaseTask: function ( worker, taskID ) {
+
+			worker._taskLoad -= worker._taskCosts[ taskID ];
+			delete worker._callbacks[ taskID ];
+			delete worker._taskCosts[ taskID ];
+
+		},
+
+		debug: function () {
+
+			console.log( 'Task load: ', this.workerPool.map( ( worker ) => worker._taskLoad ) );
+
+		},
+
+		dispose: function () {
+
+			for ( var i = 0; i < this.workerPool.length; ++ i ) {
+
+				this.workerPool[ i ].terminate();
+
+			}
+
+			this.workerPool.length = 0;
+
+			return this;
+
+		}
+
+	} );
+
+	/* WEB WORKER */
+
+	DRACOLoader.DRACOWorker = function () {
+
+		var decoderConfig;
+		var decoderPending;
+
+		onmessage = function ( e ) {
+
+			var message = e.data;
+
+			switch ( message.type ) {
+
+				case 'init':
+					decoderConfig = message.decoderConfig;
+					decoderPending = new Promise( function ( resolve/*, reject*/ ) {
+
+						decoderConfig.onModuleLoaded = function ( draco ) {
+
+							// Module is Promise-like. Wrap before resolving to avoid loop.
+							resolve( { draco: draco } );
+
+						};
+
+						DracoDecoderModule( decoderConfig );
+
+					} );
+					break;
+
+				case 'decode':
+					var buffer = message.buffer;
+					var taskConfig = message.taskConfig;
+					decoderPending.then( ( module ) => {
+
+						var draco = module.draco;
+						var decoder = new draco.Decoder();
+						var decoderBuffer = new draco.DecoderBuffer();
+						decoderBuffer.Init( new Int8Array( buffer ), buffer.byteLength );
+
+						try {
+
+							var geometry = decodeGeometry( draco, decoder, decoderBuffer, taskConfig );
+
+							var buffers = geometry.attributes.map( ( attr ) => attr.array.buffer );
+
+							if ( geometry.index ) buffers.push( geometry.index.array.buffer );
+
+							self.postMessage( { type: 'decode', id: message.id, geometry }, buffers );
+
+						} catch ( error ) {
+
+							console.error( error );
+
+							self.postMessage( { type: 'error', id: message.id, error: error.message } );
+
+						} finally {
+
+							draco.destroy( decoderBuffer );
+							draco.destroy( decoder );
+
+						}
+
+					} );
+					break;
+
+			}
+
+		};
+
+		function decodeGeometry( draco, decoder, decoderBuffer, taskConfig ) {
+
+			var attributeIDs = taskConfig.attributeIDs;
+			var attributeTypes = taskConfig.attributeTypes;
+
+			var dracoGeometry;
+			var decodingStatus;
+
+			var geometryType = decoder.GetEncodedGeometryType( decoderBuffer );
+
+			if ( geometryType === draco.TRIANGULAR_MESH ) {
+
+				dracoGeometry = new draco.Mesh();
+				decodingStatus = decoder.DecodeBufferToMesh( decoderBuffer, dracoGeometry );
+
+			} else if ( geometryType === draco.POINT_CLOUD ) {
+
+				dracoGeometry = new draco.PointCloud();
+				decodingStatus = decoder.DecodeBufferToPointCloud( decoderBuffer, dracoGeometry );
+
+			} else {
+
+				throw new Error( 'THREE.DRACOLoader: Unexpected geometry type.' );
+
+			}
+
+			if ( ! decodingStatus.ok() || dracoGeometry.ptr === 0 ) {
+
+				throw new Error( 'THREE.DRACOLoader: Decoding failed: ' + decodingStatus.error_msg() );
+
+			}
+
+			var geometry = { index: null, attributes: [] };
+
+			// Gather all vertex attributes.
+			for ( var attributeName in attributeIDs ) {
+
+				var attributeType = self[ attributeTypes[ attributeName ] ];
+
+				var attribute;
+				var attributeID;
+
+				// A Draco file may be created with default vertex attributes, whose attribute IDs
+				// are mapped 1:1 from their semantic name (POSITION, NORMAL, ...). Alternatively,
+				// a Draco file may contain a custom set of attributes, identified by known unique
+				// IDs. glTF files always do the latter, and `.drc` files typically do the former.
+				if ( taskConfig.useUniqueIDs ) {
+
+					attributeID = attributeIDs[ attributeName ];
+					attribute = decoder.GetAttributeByUniqueId( dracoGeometry, attributeID );
+
+				} else {
+
+					attributeID = decoder.GetAttributeId( dracoGeometry, draco[ attributeIDs[ attributeName ] ] );
+
+					if ( attributeID === - 1 ) continue;
+
+					attribute = decoder.GetAttribute( dracoGeometry, attributeID );
+
+				}
+
+				geometry.attributes.push( decodeAttribute( draco, decoder, dracoGeometry, attributeName, attributeType, attribute ) );
+
+			}
+
+			// Add index.
+			if ( geometryType === draco.TRIANGULAR_MESH ) {
+
+				// Generate mesh faces.
+				var numFaces = dracoGeometry.num_faces();
+				var numIndices = numFaces * 3;
+				var index = new Uint32Array( numIndices );
+				var indexArray = new draco.DracoInt32Array();
+
+				for ( var i = 0; i < numFaces; ++ i ) {
+
+					decoder.GetFaceFromMesh( dracoGeometry, i, indexArray );
+
+					for ( var j = 0; j < 3; ++ j ) {
+
+						index[ i * 3 + j ] = indexArray.GetValue( j );
+
+					}
+
+				}
+
+				geometry.index = { array: index, itemSize: 1 };
+
+				draco.destroy( indexArray );
+
+			}
+
+			draco.destroy( dracoGeometry );
+
+			return geometry;
+
+		}
+
+		function decodeAttribute( draco, decoder, dracoGeometry, attributeName, attributeType, attribute ) {
+
+			var numComponents = attribute.num_components();
+			var numPoints = dracoGeometry.num_points();
+			var numValues = numPoints * numComponents;
+			var dracoArray;
+
+			var array;
+
+			switch ( attributeType ) {
+
+				case Float32Array:
+					dracoArray = new draco.DracoFloat32Array();
+					decoder.GetAttributeFloatForAllPoints( dracoGeometry, attribute, dracoArray );
+					array = new Float32Array( numValues );
+					break;
+
+				case Int8Array:
+					dracoArray = new draco.DracoInt8Array();
+					decoder.GetAttributeInt8ForAllPoints( dracoGeometry, attribute, dracoArray );
+					array = new Int8Array( numValues );
+					break;
+
+				case Int16Array:
+					dracoArray = new draco.DracoInt16Array();
+					decoder.GetAttributeInt16ForAllPoints( dracoGeometry, attribute, dracoArray );
+					array = new Int16Array( numValues );
+					break;
+
+				case Int32Array:
+					dracoArray = new draco.DracoInt32Array();
+					decoder.GetAttributeInt32ForAllPoints( dracoGeometry, attribute, dracoArray );
+					array = new Int32Array( numValues );
+					break;
+
+				case Uint8Array:
+					dracoArray = new draco.DracoUInt8Array();
+					decoder.GetAttributeUInt8ForAllPoints( dracoGeometry, attribute, dracoArray );
+					array = new Uint8Array( numValues );
+					break;
+
+				case Uint16Array:
+					dracoArray = new draco.DracoUInt16Array();
+					decoder.GetAttributeUInt16ForAllPoints( dracoGeometry, attribute, dracoArray );
+					array = new Uint16Array( numValues );
+					break;
+
+				case Uint32Array:
+					dracoArray = new draco.DracoUInt32Array();
+					decoder.GetAttributeUInt32ForAllPoints( dracoGeometry, attribute, dracoArray );
+					array = new Uint32Array( numValues );
+					break;
+
+				default:
+					throw new Error( 'THREE.DRACOLoader: Unexpected attribute type.' );
+
+			}
+
+			for ( var i = 0; i < numValues; i ++ ) {
+
+				array[ i ] = dracoArray.GetValue( i );
+
+			}
+
+			draco.destroy( dracoArray );
+
+			return {
+				name: attributeName,
+				array: array,
+				itemSize: numComponents
+			};
+
+		}
+
+	};
+
+	DRACOLoader.taskCache = new WeakMap();
+
+	/** Deprecated static methods */
+
+	/** @deprecated */
+	DRACOLoader.setDecoderPath = function () {
+
+		console.warn( 'THREE.DRACOLoader: The .setDecoderPath() method has been removed. Use instance methods.' );
+
+	};
+
+	/** @deprecated */
+	DRACOLoader.setDecoderConfig = function () {
+
+		console.warn( 'THREE.DRACOLoader: The .setDecoderConfig() method has been removed. Use instance methods.' );
+
+	};
+
+	/** @deprecated */
+	DRACOLoader.releaseDecoderModule = function () {
+
+		console.warn( 'THREE.DRACOLoader: The .releaseDecoderModule() method has been removed. Use instance methods.' );
+
+	};
+
+	/** @deprecated */
+	DRACOLoader.getDecoderModule = function () {
+
+		console.warn( 'THREE.DRACOLoader: The .getDecoderModule() method has been removed. Use instance methods.' );
+
+	};
+
+	/**
+	 * @author qiao / https://github.com/qiao
+	 * @author mrdoob / http://mrdoob.com
+	 * @author alteredq / http://alteredqualia.com/
+	 * @author WestLangley / http://github.com/WestLangley
+	 * @author erich666 / http://erichaines.com
+	 * @author ScieCode / http://github.com/sciecode
+	 */
+
+	// This set of controls performs orbiting, dollying (zooming), and panning.
+	// Unlike TrackballControls, it maintains the "up" direction object.up (+Y by default).
+	//
+	//    Orbit - left mouse / touch: one-finger move
+	//    Zoom - middle mouse, or mousewheel / touch: two-finger spread or squish
+	//    Pan - right mouse, or left mouse + ctrl/meta/shiftKey, or arrow keys / touch: two-finger move
+
+	var OrbitControls = function ( object, domElement ) {
+
+		if ( domElement === undefined ) console.warn( 'THREE.OrbitControls: The second parameter "domElement" is now mandatory.' );
+		if ( domElement === document ) console.error( 'THREE.OrbitControls: "document" should not be used as the target "domElement". Please use "renderer.domElement" instead.' );
+
+		this.object = object;
+		this.domElement = domElement;
+
+		// Set to false to disable this control
+		this.enabled = true;
+
+		// "target" sets the location of focus, where the object orbits around
+		this.target = new Vector3();
+
+		// How far you can dolly in and out ( PerspectiveCamera only )
+		this.minDistance = 0;
+		this.maxDistance = Infinity;
+
+		// How far you can zoom in and out ( OrthographicCamera only )
+		this.minZoom = 0;
+		this.maxZoom = Infinity;
+
+		// How far you can orbit vertically, upper and lower limits.
+		// Range is 0 to Math.PI radians.
+		this.minPolarAngle = 0; // radians
+		this.maxPolarAngle = Math.PI; // radians
+
+		// How far you can orbit horizontally, upper and lower limits.
+		// If set, must be a sub-interval of the interval [ - Math.PI, Math.PI ].
+		this.minAzimuthAngle = - Infinity; // radians
+		this.maxAzimuthAngle = Infinity; // radians
+
+		// Set to true to enable damping (inertia)
+		// If damping is enabled, you must call controls.update() in your animation loop
+		this.enableDamping = false;
+		this.dampingFactor = 0.05;
+
+		// This option actually enables dollying in and out; left as "zoom" for backwards compatibility.
+		// Set to false to disable zooming
+		this.enableZoom = true;
+		this.zoomSpeed = 1.0;
+
+		// Set to false to disable rotating
+		this.enableRotate = true;
+		this.rotateSpeed = 1.0;
+
+		// Set to false to disable panning
+		this.enablePan = true;
+		this.panSpeed = 1.0;
+		this.screenSpacePanning = false; // if true, pan in screen-space
+		this.keyPanSpeed = 7.0;	// pixels moved per arrow key push
+
+		// Set to true to automatically rotate around the target
+		// If auto-rotate is enabled, you must call controls.update() in your animation loop
+		this.autoRotate = false;
+		this.autoRotateSpeed = 2.0; // 30 seconds per round when fps is 60
+
+		// Set to false to disable use of the keys
+		this.enableKeys = true;
+
+		// The four arrow keys
+		this.keys = { LEFT: 37, UP: 38, RIGHT: 39, BOTTOM: 40 };
+
+		// Mouse buttons
+		this.mouseButtons = { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN };
+
+		// Touch fingers
+		this.touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN };
+
+		// for reset
+		this.target0 = this.target.clone();
+		this.position0 = this.object.position.clone();
+		this.zoom0 = this.object.zoom;
+
+		//
+		// public methods
+		//
+
+		this.getPolarAngle = function () {
+
+			return spherical.phi;
+
+		};
+
+		this.getAzimuthalAngle = function () {
+
+			return spherical.theta;
+
+		};
+
+		this.saveState = function () {
+
+			scope.target0.copy( scope.target );
+			scope.position0.copy( scope.object.position );
+			scope.zoom0 = scope.object.zoom;
+
+		};
+
+		this.reset = function () {
+
+			scope.target.copy( scope.target0 );
+			scope.object.position.copy( scope.position0 );
+			scope.object.zoom = scope.zoom0;
+
+			scope.object.updateProjectionMatrix();
+			scope.dispatchEvent( changeEvent );
+
+			scope.update();
+
+			state = STATE.NONE;
+
+		};
+
+		// this method is exposed, but perhaps it would be better if we can make it private...
+		this.update = function () {
+
+			var offset = new Vector3();
+
+			// so camera.up is the orbit axis
+			var quat = new Quaternion().setFromUnitVectors( object.up, new Vector3( 0, 1, 0 ) );
+			var quatInverse = quat.clone().inverse();
+
+			var lastPosition = new Vector3();
+			var lastQuaternion = new Quaternion();
+
+			return function update() {
+
+				var position = scope.object.position;
+
+				offset.copy( position ).sub( scope.target );
+
+				// rotate offset to "y-axis-is-up" space
+				offset.applyQuaternion( quat );
+
+				// angle from z-axis around y-axis
+				spherical.setFromVector3( offset );
+
+				if ( scope.autoRotate && state === STATE.NONE ) {
+
+					rotateLeft( getAutoRotationAngle() );
+
+				}
+
+				if ( scope.enableDamping ) {
+
+					spherical.theta += sphericalDelta.theta * scope.dampingFactor;
+					spherical.phi += sphericalDelta.phi * scope.dampingFactor;
+
+				} else {
+
+					spherical.theta += sphericalDelta.theta;
+					spherical.phi += sphericalDelta.phi;
+
+				}
+
+				// restrict theta to be between desired limits
+				spherical.theta = Math.max( scope.minAzimuthAngle, Math.min( scope.maxAzimuthAngle, spherical.theta ) );
+
+				// restrict phi to be between desired limits
+				spherical.phi = Math.max( scope.minPolarAngle, Math.min( scope.maxPolarAngle, spherical.phi ) );
+
+				spherical.makeSafe();
+
+
+				spherical.radius *= scale;
+
+				// restrict radius to be between desired limits
+				spherical.radius = Math.max( scope.minDistance, Math.min( scope.maxDistance, spherical.radius ) );
+
+				// move target to panned location
+
+				if ( scope.enableDamping === true ) {
+
+					scope.target.addScaledVector( panOffset, scope.dampingFactor );
+
+				} else {
+
+					scope.target.add( panOffset );
+
+				}
+
+				offset.setFromSpherical( spherical );
+
+				// rotate offset back to "camera-up-vector-is-up" space
+				offset.applyQuaternion( quatInverse );
+
+				position.copy( scope.target ).add( offset );
+
+				scope.object.lookAt( scope.target );
+
+				if ( scope.enableDamping === true ) {
+
+					sphericalDelta.theta *= ( 1 - scope.dampingFactor );
+					sphericalDelta.phi *= ( 1 - scope.dampingFactor );
+
+					panOffset.multiplyScalar( 1 - scope.dampingFactor );
+
+				} else {
+
+					sphericalDelta.set( 0, 0, 0 );
+
+					panOffset.set( 0, 0, 0 );
+
+				}
+
+				scale = 1;
+
+				// update condition is:
+				// min(camera displacement, camera rotation in radians)^2 > EPS
+				// using small-angle approximation cos(x/2) = 1 - x^2 / 8
+
+				if ( zoomChanged ||
+					lastPosition.distanceToSquared( scope.object.position ) > EPS ||
+					8 * ( 1 - lastQuaternion.dot( scope.object.quaternion ) ) > EPS ) {
+
+					scope.dispatchEvent( changeEvent );
+
+					lastPosition.copy( scope.object.position );
+					lastQuaternion.copy( scope.object.quaternion );
+					zoomChanged = false;
+
+					return true;
+
+				}
+
+				return false;
+
+			};
+
+		}();
+
+		this.dispose = function () {
+
+			scope.domElement.removeEventListener( 'contextmenu', onContextMenu, false );
+			scope.domElement.removeEventListener( 'mousedown', onMouseDown, false );
+			scope.domElement.removeEventListener( 'wheel', onMouseWheel, false );
+
+			scope.domElement.removeEventListener( 'touchstart', onTouchStart, false );
+			scope.domElement.removeEventListener( 'touchend', onTouchEnd, false );
+			scope.domElement.removeEventListener( 'touchmove', onTouchMove, false );
+
+			document.removeEventListener( 'mousemove', onMouseMove, false );
+			document.removeEventListener( 'mouseup', onMouseUp, false );
+
+			scope.domElement.removeEventListener( 'keydown', onKeyDown, false );
+
+			//scope.dispatchEvent( { type: 'dispose' } ); // should this be added here?
+
+		};
+
+		//
+		// internals
+		//
+
+		var scope = this;
+
+		var changeEvent = { type: 'change' };
+		var startEvent = { type: 'start' };
+		var endEvent = { type: 'end' };
+
+		var STATE = {
+			NONE: - 1,
+			ROTATE: 0,
+			DOLLY: 1,
+			PAN: 2,
+			TOUCH_ROTATE: 3,
+			TOUCH_PAN: 4,
+			TOUCH_DOLLY_PAN: 5,
+			TOUCH_DOLLY_ROTATE: 6
+		};
+
+		var state = STATE.NONE;
+
+		var EPS = 0.000001;
+
+		// current position in spherical coordinates
+		var spherical = new Spherical();
+		var sphericalDelta = new Spherical();
+
+		var scale = 1;
+		var panOffset = new Vector3();
+		var zoomChanged = false;
+
+		var rotateStart = new Vector2();
+		var rotateEnd = new Vector2();
+		var rotateDelta = new Vector2();
+
+		var panStart = new Vector2();
+		var panEnd = new Vector2();
+		var panDelta = new Vector2();
+
+		var dollyStart = new Vector2();
+		var dollyEnd = new Vector2();
+		var dollyDelta = new Vector2();
+
+		function getAutoRotationAngle() {
+
+			return 2 * Math.PI / 60 / 60 * scope.autoRotateSpeed;
+
+		}
+
+		function getZoomScale() {
+
+			return Math.pow( 0.95, scope.zoomSpeed );
+
+		}
+
+		function rotateLeft( angle ) {
+
+			sphericalDelta.theta -= angle;
+
+		}
+
+		function rotateUp( angle ) {
+
+			sphericalDelta.phi -= angle;
+
+		}
+
+		var panLeft = function () {
+
+			var v = new Vector3();
+
+			return function panLeft( distance, objectMatrix ) {
+
+				v.setFromMatrixColumn( objectMatrix, 0 ); // get X column of objectMatrix
+				v.multiplyScalar( - distance );
+
+				panOffset.add( v );
+
+			};
+
+		}();
+
+		var panUp = function () {
+
+			var v = new Vector3();
+
+			return function panUp( distance, objectMatrix ) {
+
+				if ( scope.screenSpacePanning === true ) {
+
+					v.setFromMatrixColumn( objectMatrix, 1 );
+
+				} else {
+
+					v.setFromMatrixColumn( objectMatrix, 0 );
+					v.crossVectors( scope.object.up, v );
+
+				}
+
+				v.multiplyScalar( distance );
+
+				panOffset.add( v );
+
+			};
+
+		}();
+
+		// deltaX and deltaY are in pixels; right and down are positive
+		var pan = function () {
+
+			var offset = new Vector3();
+
+			return function pan( deltaX, deltaY ) {
+
+				var element = scope.domElement;
+
+				if ( scope.object.isPerspectiveCamera ) {
+
+					// perspective
+					var position = scope.object.position;
+					offset.copy( position ).sub( scope.target );
+					var targetDistance = offset.length();
+
+					// half of the fov is center to top of screen
+					targetDistance *= Math.tan( ( scope.object.fov / 2 ) * Math.PI / 180.0 );
+
+					// we use only clientHeight here so aspect ratio does not distort speed
+					panLeft( 2 * deltaX * targetDistance / element.clientHeight, scope.object.matrix );
+					panUp( 2 * deltaY * targetDistance / element.clientHeight, scope.object.matrix );
+
+				} else if ( scope.object.isOrthographicCamera ) {
+
+					// orthographic
+					panLeft( deltaX * ( scope.object.right - scope.object.left ) / scope.object.zoom / element.clientWidth, scope.object.matrix );
+					panUp( deltaY * ( scope.object.top - scope.object.bottom ) / scope.object.zoom / element.clientHeight, scope.object.matrix );
+
+				} else {
+
+					// camera neither orthographic nor perspective
+					console.warn( 'WARNING: OrbitControls.js encountered an unknown camera type - pan disabled.' );
+					scope.enablePan = false;
+
+				}
+
+			};
+
+		}();
+
+		function dollyOut( dollyScale ) {
+
+			if ( scope.object.isPerspectiveCamera ) {
+
+				scale /= dollyScale;
+
+			} else if ( scope.object.isOrthographicCamera ) {
+
+				scope.object.zoom = Math.max( scope.minZoom, Math.min( scope.maxZoom, scope.object.zoom * dollyScale ) );
+				scope.object.updateProjectionMatrix();
+				zoomChanged = true;
+
+			} else {
+
+				console.warn( 'WARNING: OrbitControls.js encountered an unknown camera type - dolly/zoom disabled.' );
+				scope.enableZoom = false;
+
+			}
+
+		}
+
+		function dollyIn( dollyScale ) {
+
+			if ( scope.object.isPerspectiveCamera ) {
+
+				scale *= dollyScale;
+
+			} else if ( scope.object.isOrthographicCamera ) {
+
+				scope.object.zoom = Math.max( scope.minZoom, Math.min( scope.maxZoom, scope.object.zoom / dollyScale ) );
+				scope.object.updateProjectionMatrix();
+				zoomChanged = true;
+
+			} else {
+
+				console.warn( 'WARNING: OrbitControls.js encountered an unknown camera type - dolly/zoom disabled.' );
+				scope.enableZoom = false;
+
+			}
+
+		}
+
+		//
+		// event callbacks - update the object state
+		//
+
+		function handleMouseDownRotate( event ) {
+
+			rotateStart.set( event.clientX, event.clientY );
+
+		}
+
+		function handleMouseDownDolly( event ) {
+
+			dollyStart.set( event.clientX, event.clientY );
+
+		}
+
+		function handleMouseDownPan( event ) {
+
+			panStart.set( event.clientX, event.clientY );
+
+		}
+
+		function handleMouseMoveRotate( event ) {
+
+			rotateEnd.set( event.clientX, event.clientY );
+
+			rotateDelta.subVectors( rotateEnd, rotateStart ).multiplyScalar( scope.rotateSpeed );
+
+			var element = scope.domElement;
+
+			rotateLeft( 2 * Math.PI * rotateDelta.x / element.clientHeight ); // yes, height
+
+			rotateUp( 2 * Math.PI * rotateDelta.y / element.clientHeight );
+
+			rotateStart.copy( rotateEnd );
+
+			scope.update();
+
+		}
+
+		function handleMouseMoveDolly( event ) {
+
+			dollyEnd.set( event.clientX, event.clientY );
+
+			dollyDelta.subVectors( dollyEnd, dollyStart );
+
+			if ( dollyDelta.y > 0 ) {
+
+				dollyOut( getZoomScale() );
+
+			} else if ( dollyDelta.y < 0 ) {
+
+				dollyIn( getZoomScale() );
+
+			}
+
+			dollyStart.copy( dollyEnd );
+
+			scope.update();
+
+		}
+
+		function handleMouseMovePan( event ) {
+
+			panEnd.set( event.clientX, event.clientY );
+
+			panDelta.subVectors( panEnd, panStart ).multiplyScalar( scope.panSpeed );
+
+			pan( panDelta.x, panDelta.y );
+
+			panStart.copy( panEnd );
+
+			scope.update();
+
+		}
+
+		function handleMouseWheel( event ) {
+
+			if ( event.deltaY < 0 ) {
+
+				dollyIn( getZoomScale() );
+
+			} else if ( event.deltaY > 0 ) {
+
+				dollyOut( getZoomScale() );
+
+			}
+
+			scope.update();
+
+		}
+
+		function handleKeyDown( event ) {
+
+			var needsUpdate = false;
+
+			switch ( event.keyCode ) {
+
+				case scope.keys.UP:
+					pan( 0, scope.keyPanSpeed );
+					needsUpdate = true;
+					break;
+
+				case scope.keys.BOTTOM:
+					pan( 0, - scope.keyPanSpeed );
+					needsUpdate = true;
+					break;
+
+				case scope.keys.LEFT:
+					pan( scope.keyPanSpeed, 0 );
+					needsUpdate = true;
+					break;
+
+				case scope.keys.RIGHT:
+					pan( - scope.keyPanSpeed, 0 );
+					needsUpdate = true;
+					break;
+
+			}
+
+			if ( needsUpdate ) {
+
+				// prevent the browser from scrolling on cursor keys
+				event.preventDefault();
+
+				scope.update();
+
+			}
+
+
+		}
+
+		function handleTouchStartRotate( event ) {
+
+			if ( event.touches.length == 1 ) {
+
+				rotateStart.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
+
+			} else {
+
+				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
+				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
+
+				rotateStart.set( x, y );
+
+			}
+
+		}
+
+		function handleTouchStartPan( event ) {
+
+			if ( event.touches.length == 1 ) {
+
+				panStart.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
+
+			} else {
+
+				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
+				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
+
+				panStart.set( x, y );
+
+			}
+
+		}
+
+		function handleTouchStartDolly( event ) {
+
+			var dx = event.touches[ 0 ].pageX - event.touches[ 1 ].pageX;
+			var dy = event.touches[ 0 ].pageY - event.touches[ 1 ].pageY;
+
+			var distance = Math.sqrt( dx * dx + dy * dy );
+
+			dollyStart.set( 0, distance );
+
+		}
+
+		function handleTouchStartDollyPan( event ) {
+
+			if ( scope.enableZoom ) handleTouchStartDolly( event );
+
+			if ( scope.enablePan ) handleTouchStartPan( event );
+
+		}
+
+		function handleTouchStartDollyRotate( event ) {
+
+			if ( scope.enableZoom ) handleTouchStartDolly( event );
+
+			if ( scope.enableRotate ) handleTouchStartRotate( event );
+
+		}
+
+		function handleTouchMoveRotate( event ) {
+
+			if ( event.touches.length == 1 ) {
+
+				rotateEnd.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
+
+			} else {
+
+				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
+				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
+
+				rotateEnd.set( x, y );
+
+			}
+
+			rotateDelta.subVectors( rotateEnd, rotateStart ).multiplyScalar( scope.rotateSpeed );
+
+			var element = scope.domElement;
+
+			rotateLeft( 2 * Math.PI * rotateDelta.x / element.clientHeight ); // yes, height
+
+			rotateUp( 2 * Math.PI * rotateDelta.y / element.clientHeight );
+
+			rotateStart.copy( rotateEnd );
+
+		}
+
+		function handleTouchMovePan( event ) {
+
+			if ( event.touches.length == 1 ) {
+
+				panEnd.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
+
+			} else {
+
+				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
+				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
+
+				panEnd.set( x, y );
+
+			}
+
+			panDelta.subVectors( panEnd, panStart ).multiplyScalar( scope.panSpeed );
+
+			pan( panDelta.x, panDelta.y );
+
+			panStart.copy( panEnd );
+
+		}
+
+		function handleTouchMoveDolly( event ) {
+
+			var dx = event.touches[ 0 ].pageX - event.touches[ 1 ].pageX;
+			var dy = event.touches[ 0 ].pageY - event.touches[ 1 ].pageY;
+
+			var distance = Math.sqrt( dx * dx + dy * dy );
+
+			dollyEnd.set( 0, distance );
+
+			dollyDelta.set( 0, Math.pow( dollyEnd.y / dollyStart.y, scope.zoomSpeed ) );
+
+			dollyOut( dollyDelta.y );
+
+			dollyStart.copy( dollyEnd );
+
+		}
+
+		function handleTouchMoveDollyPan( event ) {
+
+			if ( scope.enableZoom ) handleTouchMoveDolly( event );
+
+			if ( scope.enablePan ) handleTouchMovePan( event );
+
+		}
+
+		function handleTouchMoveDollyRotate( event ) {
+
+			if ( scope.enableZoom ) handleTouchMoveDolly( event );
+
+			if ( scope.enableRotate ) handleTouchMoveRotate( event );
+
+		}
+
+		//
+		// event handlers - FSM: listen for events and reset state
+		//
+
+		function onMouseDown( event ) {
+
+			if ( scope.enabled === false ) return;
+
+			// Prevent the browser from scrolling.
+			event.preventDefault();
+
+			// Manually set the focus since calling preventDefault above
+			// prevents the browser from setting it automatically.
+
+			scope.domElement.focus ? scope.domElement.focus() : window.focus();
+
+			var mouseAction;
+
+			switch ( event.button ) {
+
+				case 0:
+
+					mouseAction = scope.mouseButtons.LEFT;
+					break;
+
+				case 1:
+
+					mouseAction = scope.mouseButtons.MIDDLE;
+					break;
+
+				case 2:
+
+					mouseAction = scope.mouseButtons.RIGHT;
+					break;
+
+				default:
+
+					mouseAction = - 1;
+
+			}
+
+			switch ( mouseAction ) {
+
+				case MOUSE.DOLLY:
+
+					if ( scope.enableZoom === false ) return;
+
+					handleMouseDownDolly( event );
+
+					state = STATE.DOLLY;
+
+					break;
+
+				case MOUSE.ROTATE:
+
+					if ( event.ctrlKey || event.metaKey || event.shiftKey ) {
+
+						if ( scope.enablePan === false ) return;
+
+						handleMouseDownPan( event );
+
+						state = STATE.PAN;
+
+					} else {
+
+						if ( scope.enableRotate === false ) return;
+
+						handleMouseDownRotate( event );
+
+						state = STATE.ROTATE;
+
+					}
+
+					break;
+
+				case MOUSE.PAN:
+
+					if ( event.ctrlKey || event.metaKey || event.shiftKey ) {
+
+						if ( scope.enableRotate === false ) return;
+
+						handleMouseDownRotate( event );
+
+						state = STATE.ROTATE;
+
+					} else {
+
+						if ( scope.enablePan === false ) return;
+
+						handleMouseDownPan( event );
+
+						state = STATE.PAN;
+
+					}
+
+					break;
+
+				default:
+
+					state = STATE.NONE;
+
+			}
+
+			if ( state !== STATE.NONE ) {
+
+				document.addEventListener( 'mousemove', onMouseMove, false );
+				document.addEventListener( 'mouseup', onMouseUp, false );
+
+				scope.dispatchEvent( startEvent );
+
+			}
+
+		}
+
+		function onMouseMove( event ) {
+
+			if ( scope.enabled === false ) return;
+
+			event.preventDefault();
+
+			switch ( state ) {
+
+				case STATE.ROTATE:
+
+					if ( scope.enableRotate === false ) return;
+
+					handleMouseMoveRotate( event );
+
+					break;
+
+				case STATE.DOLLY:
+
+					if ( scope.enableZoom === false ) return;
+
+					handleMouseMoveDolly( event );
+
+					break;
+
+				case STATE.PAN:
+
+					if ( scope.enablePan === false ) return;
+
+					handleMouseMovePan( event );
+
+					break;
+
+			}
+
+		}
+
+		function onMouseUp( event ) {
+
+			if ( scope.enabled === false ) return;
+
+			document.removeEventListener( 'mousemove', onMouseMove, false );
+			document.removeEventListener( 'mouseup', onMouseUp, false );
+
+			scope.dispatchEvent( endEvent );
+
+			state = STATE.NONE;
+
+		}
+
+		function onMouseWheel( event ) {
+
+			if ( scope.enabled === false || scope.enableZoom === false || ( state !== STATE.NONE && state !== STATE.ROTATE ) ) return;
+
+			event.preventDefault();
+			event.stopPropagation();
+
+			scope.dispatchEvent( startEvent );
+
+			handleMouseWheel( event );
+
+			scope.dispatchEvent( endEvent );
+
+		}
+
+		function onKeyDown( event ) {
+
+			if ( scope.enabled === false || scope.enableKeys === false || scope.enablePan === false ) return;
+
+			handleKeyDown( event );
+
+		}
+
+		function onTouchStart( event ) {
+
+			if ( scope.enabled === false ) return;
+
+			event.preventDefault(); // prevent scrolling
+
+			switch ( event.touches.length ) {
+
+				case 1:
+
+					switch ( scope.touches.ONE ) {
+
+						case TOUCH.ROTATE:
+
+							if ( scope.enableRotate === false ) return;
+
+							handleTouchStartRotate( event );
+
+							state = STATE.TOUCH_ROTATE;
+
+							break;
+
+						case TOUCH.PAN:
+
+							if ( scope.enablePan === false ) return;
+
+							handleTouchStartPan( event );
+
+							state = STATE.TOUCH_PAN;
+
+							break;
+
+						default:
+
+							state = STATE.NONE;
+
+					}
+
+					break;
+
+				case 2:
+
+					switch ( scope.touches.TWO ) {
+
+						case TOUCH.DOLLY_PAN:
+
+							if ( scope.enableZoom === false && scope.enablePan === false ) return;
+
+							handleTouchStartDollyPan( event );
+
+							state = STATE.TOUCH_DOLLY_PAN;
+
+							break;
+
+						case TOUCH.DOLLY_ROTATE:
+
+							if ( scope.enableZoom === false && scope.enableRotate === false ) return;
+
+							handleTouchStartDollyRotate( event );
+
+							state = STATE.TOUCH_DOLLY_ROTATE;
+
+							break;
+
+						default:
+
+							state = STATE.NONE;
+
+					}
+
+					break;
+
+				default:
+
+					state = STATE.NONE;
+
+			}
+
+			if ( state !== STATE.NONE ) {
+
+				scope.dispatchEvent( startEvent );
+
+			}
+
+		}
+
+		function onTouchMove( event ) {
+
+			if ( scope.enabled === false ) return;
+
+			event.preventDefault(); // prevent scrolling
+			event.stopPropagation();
+
+			switch ( state ) {
+
+				case STATE.TOUCH_ROTATE:
+
+					if ( scope.enableRotate === false ) return;
+
+					handleTouchMoveRotate( event );
+
+					scope.update();
+
+					break;
+
+				case STATE.TOUCH_PAN:
+
+					if ( scope.enablePan === false ) return;
+
+					handleTouchMovePan( event );
+
+					scope.update();
+
+					break;
+
+				case STATE.TOUCH_DOLLY_PAN:
+
+					if ( scope.enableZoom === false && scope.enablePan === false ) return;
+
+					handleTouchMoveDollyPan( event );
+
+					scope.update();
+
+					break;
+
+				case STATE.TOUCH_DOLLY_ROTATE:
+
+					if ( scope.enableZoom === false && scope.enableRotate === false ) return;
+
+					handleTouchMoveDollyRotate( event );
+
+					scope.update();
+
+					break;
+
+				default:
+
+					state = STATE.NONE;
+
+			}
+
+		}
+
+		function onTouchEnd( event ) {
+
+			if ( scope.enabled === false ) return;
+
+			scope.dispatchEvent( endEvent );
+
+			state = STATE.NONE;
+
+		}
+
+		function onContextMenu( event ) {
+
+			if ( scope.enabled === false ) return;
+
+			event.preventDefault();
+
+		}
+
+		//
+
+		scope.domElement.addEventListener( 'contextmenu', onContextMenu, false );
+
+		scope.domElement.addEventListener( 'mousedown', onMouseDown, false );
+		scope.domElement.addEventListener( 'wheel', onMouseWheel, false );
+
+		scope.domElement.addEventListener( 'touchstart', onTouchStart, false );
+		scope.domElement.addEventListener( 'touchend', onTouchEnd, false );
+		scope.domElement.addEventListener( 'touchmove', onTouchMove, false );
+
+		scope.domElement.addEventListener( 'keydown', onKeyDown, false );
+
+		// make sure element can receive keys.
+
+		if ( scope.domElement.tabIndex === - 1 ) {
+
+			scope.domElement.tabIndex = 0;
+
+		}
+
+		// force an update at start
+
+		this.update();
+
+	};
+
+	OrbitControls.prototype = Object.create( EventDispatcher.prototype );
+	OrbitControls.prototype.constructor = OrbitControls;
+
+
+	// This set of controls performs orbiting, dollying (zooming), and panning.
+	// Unlike TrackballControls, it maintains the "up" direction object.up (+Y by default).
+	// This is very similar to OrbitControls, another set of touch behavior
+	//
+	//    Orbit - right mouse, or left mouse + ctrl/meta/shiftKey / touch: two-finger rotate
+	//    Zoom - middle mouse, or mousewheel / touch: two-finger spread or squish
+	//    Pan - left mouse, or arrow keys / touch: one-finger move
+
+	var MapControls = function ( object, domElement ) {
+
+		OrbitControls.call( this, object, domElement );
+
+		this.mouseButtons.LEFT = MOUSE.PAN;
+		this.mouseButtons.RIGHT = MOUSE.ROTATE;
+
+		this.touches.ONE = TOUCH.PAN;
+		this.touches.TWO = TOUCH.DOLLY_ROTATE;
+
+	};
+
+	MapControls.prototype = Object.create( EventDispatcher.prototype );
+	MapControls.prototype.constructor = MapControls;
+
+	class Queue {
+	    constructor() { 
+	        this.items = []; 
+	    } 
+	    enqueue(item) {
+	        this.items.push(item); 
+	    }
+	    dequeue() {
+	        if(this.isEmpty()) 
+	            return "Underflow"; 
+	        return this.items.shift();
+	    }
+	    front() {
+	        if(this.isEmpty()) 
+	            return "No elements in Queue"; 
+	        return this.items[0]; 
+	    } 
+	    isEmpty() {
+	        return this.items.length == 0; 
+	    } 
+	    printQueue() {
+	        var str = ""; 
+	        for(var i = 0; i < this.items.length; i++) 
+	            str += this.items[i] +" "; 
+	        return str; 
+	    } 
+	}
+
+	/**
 	 * @author fernandojsg / http://fernandojsg.com
 	 * @author Don McCurdy / https://www.donmccurdy.com
 	 * @author Takahiro / https://github.com/takahirox
@@ -55481,1856 +57325,40 @@
 
 	};
 
-	/**
-	 * @author Don McCurdy / https://www.donmccurdy.com
-	 */
-
-	var DRACOLoader = function ( manager ) {
-
-		Loader.call( this, manager );
-
-		this.decoderPath = '';
-		this.decoderConfig = {};
-		this.decoderBinary = null;
-		this.decoderPending = null;
-
-		this.workerLimit = 4;
-		this.workerPool = [];
-		this.workerNextTaskID = 1;
-		this.workerSourceURL = '';
-
-		this.defaultAttributeIDs = {
-			position: 'POSITION',
-			normal: 'NORMAL',
-			color: 'COLOR',
-			uv: 'TEX_COORD'
-		};
-		this.defaultAttributeTypes = {
-			position: 'Float32Array',
-			normal: 'Float32Array',
-			color: 'Float32Array',
-			uv: 'Float32Array'
-		};
-
-	};
-
-	DRACOLoader.prototype = Object.assign( Object.create( Loader.prototype ), {
-
-		constructor: DRACOLoader,
-
-		setDecoderPath: function ( path ) {
-
-			this.decoderPath = path;
-
-			return this;
-
-		},
-
-		setDecoderConfig: function ( config ) {
-
-			this.decoderConfig = config;
-
-			return this;
-
-		},
-
-		setWorkerLimit: function ( workerLimit ) {
-
-			this.workerLimit = workerLimit;
-
-			return this;
-
-		},
-
-		/** @deprecated */
-		setVerbosity: function () {
-
-			console.warn( 'THREE.DRACOLoader: The .setVerbosity() method has been removed.' );
-
-		},
-
-		/** @deprecated */
-		setDrawMode: function () {
-
-			console.warn( 'THREE.DRACOLoader: The .setDrawMode() method has been removed.' );
-
-		},
-
-		/** @deprecated */
-		setSkipDequantization: function () {
-
-			console.warn( 'THREE.DRACOLoader: The .setSkipDequantization() method has been removed.' );
-
-		},
-
-		load: function ( url, onLoad, onProgress, onError ) {
-
-			var loader = new FileLoader( this.manager );
-
-			loader.setPath( this.path );
-			loader.setResponseType( 'arraybuffer' );
-
-			if ( this.crossOrigin === 'use-credentials' ) {
-
-				loader.setWithCredentials( true );
-
-			}
-
-			loader.load( url, ( buffer ) => {
-
-				var taskConfig = {
-					attributeIDs: this.defaultAttributeIDs,
-					attributeTypes: this.defaultAttributeTypes,
-					useUniqueIDs: false
-				};
-
-				this.decodeGeometry( buffer, taskConfig )
-					.then( onLoad )
-					.catch( onError );
-
-			}, onProgress, onError );
-
-		},
-
-		/** @deprecated Kept for backward-compatibility with previous DRACOLoader versions. */
-		decodeDracoFile: function ( buffer, callback, attributeIDs, attributeTypes ) {
-
-			var taskConfig = {
-				attributeIDs: attributeIDs || this.defaultAttributeIDs,
-				attributeTypes: attributeTypes || this.defaultAttributeTypes,
-				useUniqueIDs: !! attributeIDs
-			};
-
-			this.decodeGeometry( buffer, taskConfig ).then( callback );
-
-		},
-
-		decodeGeometry: function ( buffer, taskConfig ) {
-
-			// TODO: For backward-compatibility, support 'attributeTypes' objects containing
-			// references (rather than names) to typed array constructors. These must be
-			// serialized before sending them to the worker.
-			for ( var attribute in taskConfig.attributeTypes ) {
-
-				var type = taskConfig.attributeTypes[ attribute ];
-
-				if ( type.BYTES_PER_ELEMENT !== undefined ) {
-
-					taskConfig.attributeTypes[ attribute ] = type.name;
-
-				}
-
-			}
-
-			//
-
-			var taskKey = JSON.stringify( taskConfig );
-
-			// Check for an existing task using this buffer. A transferred buffer cannot be transferred
-			// again from this thread.
-			if ( DRACOLoader.taskCache.has( buffer ) ) {
-
-				var cachedTask = DRACOLoader.taskCache.get( buffer );
-
-				if ( cachedTask.key === taskKey ) {
-
-					return cachedTask.promise;
-
-				} else if ( buffer.byteLength === 0 ) {
-
-					// Technically, it would be possible to wait for the previous task to complete,
-					// transfer the buffer back, and decode again with the second configuration. That
-					// is complex, and I don't know of any reason to decode a Draco buffer twice in
-					// different ways, so this is left unimplemented.
-					throw new Error(
-
-						'THREE.DRACOLoader: Unable to re-decode a buffer with different ' +
-						'settings. Buffer has already been transferred.'
-
-					);
-
-				}
-
-			}
-
-			//
-
-			var worker;
-			var taskID = this.workerNextTaskID ++;
-			var taskCost = buffer.byteLength;
-
-			// Obtain a worker and assign a task, and construct a geometry instance
-			// when the task completes.
-			var geometryPending = this._getWorker( taskID, taskCost )
-				.then( ( _worker ) => {
-
-					worker = _worker;
-
-					return new Promise( ( resolve, reject ) => {
-
-						worker._callbacks[ taskID ] = { resolve, reject };
-
-						worker.postMessage( { type: 'decode', id: taskID, taskConfig, buffer }, [ buffer ] );
-
-						// this.debug();
-
-					} );
-
-				} )
-				.then( ( message ) => this._createGeometry( message.geometry ) );
-
-			// Remove task from the task list.
-			// Note: replaced '.finally()' with '.catch().then()' block - iOS 11 support (#19416)
-			geometryPending
-				.catch( () => true )
-				.then( () => {
-
-					if ( worker && taskID ) {
-
-						this._releaseTask( worker, taskID );
-
-						// this.debug();
-
-					}
-
-				} );
-
-			// Cache the task result.
-			DRACOLoader.taskCache.set( buffer, {
-
-				key: taskKey,
-				promise: geometryPending
-
-			} );
-
-			return geometryPending;
-
-		},
-
-		_createGeometry: function ( geometryData ) {
-
-			var geometry = new BufferGeometry();
-
-			if ( geometryData.index ) {
-
-				geometry.setIndex( new BufferAttribute( geometryData.index.array, 1 ) );
-
-			}
-
-			for ( var i = 0; i < geometryData.attributes.length; i ++ ) {
-
-				var attribute = geometryData.attributes[ i ];
-				var name = attribute.name;
-				var array = attribute.array;
-				var itemSize = attribute.itemSize;
-
-				geometry.setAttribute( name, new BufferAttribute( array, itemSize ) );
-
-			}
-
-			return geometry;
-
-		},
-
-		_loadLibrary: function ( url, responseType ) {
-
-			var loader = new FileLoader( this.manager );
-			loader.setPath( this.decoderPath );
-			loader.setResponseType( responseType );
-
-			return new Promise( ( resolve, reject ) => {
-
-				loader.load( url, resolve, undefined, reject );
-
-			} );
-
-		},
-
-		preload: function () {
-
-			this._initDecoder();
-
-			return this;
-
-		},
-
-		_initDecoder: function () {
-
-			if ( this.decoderPending ) return this.decoderPending;
-
-			var useJS = typeof WebAssembly !== 'object' || this.decoderConfig.type === 'js';
-			var librariesPending = [];
-
-			if ( useJS ) {
-
-				librariesPending.push( this._loadLibrary( 'draco_decoder.js', 'text' ) );
-
-			} else {
-
-				librariesPending.push( this._loadLibrary( 'draco_wasm_wrapper.js', 'text' ) );
-				librariesPending.push( this._loadLibrary( 'draco_decoder.wasm', 'arraybuffer' ) );
-
-			}
-
-			this.decoderPending = Promise.all( librariesPending )
-				.then( ( libraries ) => {
-
-					var jsContent = libraries[ 0 ];
-
-					if ( ! useJS ) {
-
-						this.decoderConfig.wasmBinary = libraries[ 1 ];
-
-					}
-
-					var fn = DRACOLoader.DRACOWorker.toString();
-
-					var body = [
-						'/* draco decoder */',
-						jsContent,
-						'',
-						'/* worker */',
-						fn.substring( fn.indexOf( '{' ) + 1, fn.lastIndexOf( '}' ) )
-					].join( '\n' );
-
-					this.workerSourceURL = URL.createObjectURL( new Blob( [ body ] ) );
-
-				} );
-
-			return this.decoderPending;
-
-		},
-
-		_getWorker: function ( taskID, taskCost ) {
-
-			return this._initDecoder().then( () => {
-
-				if ( this.workerPool.length < this.workerLimit ) {
-
-					var worker = new Worker( this.workerSourceURL );
-
-					worker._callbacks = {};
-					worker._taskCosts = {};
-					worker._taskLoad = 0;
-
-					worker.postMessage( { type: 'init', decoderConfig: this.decoderConfig } );
-
-					worker.onmessage = function ( e ) {
-
-						var message = e.data;
-
-						switch ( message.type ) {
-
-							case 'decode':
-								worker._callbacks[ message.id ].resolve( message );
-								break;
-
-							case 'error':
-								worker._callbacks[ message.id ].reject( message );
-								break;
-
-							default:
-								console.error( 'THREE.DRACOLoader: Unexpected message, "' + message.type + '"' );
-
-						}
-
-					};
-
-					this.workerPool.push( worker );
-
-				} else {
-
-					this.workerPool.sort( function ( a, b ) {
-
-						return a._taskLoad > b._taskLoad ? - 1 : 1;
-
-					} );
-
-				}
-
-				var worker = this.workerPool[ this.workerPool.length - 1 ];
-				worker._taskCosts[ taskID ] = taskCost;
-				worker._taskLoad += taskCost;
-				return worker;
-
-			} );
-
-		},
-
-		_releaseTask: function ( worker, taskID ) {
-
-			worker._taskLoad -= worker._taskCosts[ taskID ];
-			delete worker._callbacks[ taskID ];
-			delete worker._taskCosts[ taskID ];
-
-		},
-
-		debug: function () {
-
-			console.log( 'Task load: ', this.workerPool.map( ( worker ) => worker._taskLoad ) );
-
-		},
-
-		dispose: function () {
-
-			for ( var i = 0; i < this.workerPool.length; ++ i ) {
-
-				this.workerPool[ i ].terminate();
-
-			}
-
-			this.workerPool.length = 0;
-
-			return this;
-
-		}
-
-	} );
-
-	/* WEB WORKER */
-
-	DRACOLoader.DRACOWorker = function () {
-
-		var decoderConfig;
-		var decoderPending;
-
-		onmessage = function ( e ) {
-
-			var message = e.data;
-
-			switch ( message.type ) {
-
-				case 'init':
-					decoderConfig = message.decoderConfig;
-					decoderPending = new Promise( function ( resolve/*, reject*/ ) {
-
-						decoderConfig.onModuleLoaded = function ( draco ) {
-
-							// Module is Promise-like. Wrap before resolving to avoid loop.
-							resolve( { draco: draco } );
-
-						};
-
-						DracoDecoderModule( decoderConfig );
-
-					} );
-					break;
-
-				case 'decode':
-					var buffer = message.buffer;
-					var taskConfig = message.taskConfig;
-					decoderPending.then( ( module ) => {
-
-						var draco = module.draco;
-						var decoder = new draco.Decoder();
-						var decoderBuffer = new draco.DecoderBuffer();
-						decoderBuffer.Init( new Int8Array( buffer ), buffer.byteLength );
-
-						try {
-
-							var geometry = decodeGeometry( draco, decoder, decoderBuffer, taskConfig );
-
-							var buffers = geometry.attributes.map( ( attr ) => attr.array.buffer );
-
-							if ( geometry.index ) buffers.push( geometry.index.array.buffer );
-
-							self.postMessage( { type: 'decode', id: message.id, geometry }, buffers );
-
-						} catch ( error ) {
-
-							console.error( error );
-
-							self.postMessage( { type: 'error', id: message.id, error: error.message } );
-
-						} finally {
-
-							draco.destroy( decoderBuffer );
-							draco.destroy( decoder );
-
-						}
-
-					} );
-					break;
-
-			}
-
-		};
-
-		function decodeGeometry( draco, decoder, decoderBuffer, taskConfig ) {
-
-			var attributeIDs = taskConfig.attributeIDs;
-			var attributeTypes = taskConfig.attributeTypes;
-
-			var dracoGeometry;
-			var decodingStatus;
-
-			var geometryType = decoder.GetEncodedGeometryType( decoderBuffer );
-
-			if ( geometryType === draco.TRIANGULAR_MESH ) {
-
-				dracoGeometry = new draco.Mesh();
-				decodingStatus = decoder.DecodeBufferToMesh( decoderBuffer, dracoGeometry );
-
-			} else if ( geometryType === draco.POINT_CLOUD ) {
-
-				dracoGeometry = new draco.PointCloud();
-				decodingStatus = decoder.DecodeBufferToPointCloud( decoderBuffer, dracoGeometry );
-
-			} else {
-
-				throw new Error( 'THREE.DRACOLoader: Unexpected geometry type.' );
-
-			}
-
-			if ( ! decodingStatus.ok() || dracoGeometry.ptr === 0 ) {
-
-				throw new Error( 'THREE.DRACOLoader: Decoding failed: ' + decodingStatus.error_msg() );
-
-			}
-
-			var geometry = { index: null, attributes: [] };
-
-			// Gather all vertex attributes.
-			for ( var attributeName in attributeIDs ) {
-
-				var attributeType = self[ attributeTypes[ attributeName ] ];
-
-				var attribute;
-				var attributeID;
-
-				// A Draco file may be created with default vertex attributes, whose attribute IDs
-				// are mapped 1:1 from their semantic name (POSITION, NORMAL, ...). Alternatively,
-				// a Draco file may contain a custom set of attributes, identified by known unique
-				// IDs. glTF files always do the latter, and `.drc` files typically do the former.
-				if ( taskConfig.useUniqueIDs ) {
-
-					attributeID = attributeIDs[ attributeName ];
-					attribute = decoder.GetAttributeByUniqueId( dracoGeometry, attributeID );
-
-				} else {
-
-					attributeID = decoder.GetAttributeId( dracoGeometry, draco[ attributeIDs[ attributeName ] ] );
-
-					if ( attributeID === - 1 ) continue;
-
-					attribute = decoder.GetAttribute( dracoGeometry, attributeID );
-
-				}
-
-				geometry.attributes.push( decodeAttribute( draco, decoder, dracoGeometry, attributeName, attributeType, attribute ) );
-
-			}
-
-			// Add index.
-			if ( geometryType === draco.TRIANGULAR_MESH ) {
-
-				// Generate mesh faces.
-				var numFaces = dracoGeometry.num_faces();
-				var numIndices = numFaces * 3;
-				var index = new Uint32Array( numIndices );
-				var indexArray = new draco.DracoInt32Array();
-
-				for ( var i = 0; i < numFaces; ++ i ) {
-
-					decoder.GetFaceFromMesh( dracoGeometry, i, indexArray );
-
-					for ( var j = 0; j < 3; ++ j ) {
-
-						index[ i * 3 + j ] = indexArray.GetValue( j );
-
-					}
-
-				}
-
-				geometry.index = { array: index, itemSize: 1 };
-
-				draco.destroy( indexArray );
-
-			}
-
-			draco.destroy( dracoGeometry );
-
-			return geometry;
-
-		}
-
-		function decodeAttribute( draco, decoder, dracoGeometry, attributeName, attributeType, attribute ) {
-
-			var numComponents = attribute.num_components();
-			var numPoints = dracoGeometry.num_points();
-			var numValues = numPoints * numComponents;
-			var dracoArray;
-
-			var array;
-
-			switch ( attributeType ) {
-
-				case Float32Array:
-					dracoArray = new draco.DracoFloat32Array();
-					decoder.GetAttributeFloatForAllPoints( dracoGeometry, attribute, dracoArray );
-					array = new Float32Array( numValues );
-					break;
-
-				case Int8Array:
-					dracoArray = new draco.DracoInt8Array();
-					decoder.GetAttributeInt8ForAllPoints( dracoGeometry, attribute, dracoArray );
-					array = new Int8Array( numValues );
-					break;
-
-				case Int16Array:
-					dracoArray = new draco.DracoInt16Array();
-					decoder.GetAttributeInt16ForAllPoints( dracoGeometry, attribute, dracoArray );
-					array = new Int16Array( numValues );
-					break;
-
-				case Int32Array:
-					dracoArray = new draco.DracoInt32Array();
-					decoder.GetAttributeInt32ForAllPoints( dracoGeometry, attribute, dracoArray );
-					array = new Int32Array( numValues );
-					break;
-
-				case Uint8Array:
-					dracoArray = new draco.DracoUInt8Array();
-					decoder.GetAttributeUInt8ForAllPoints( dracoGeometry, attribute, dracoArray );
-					array = new Uint8Array( numValues );
-					break;
-
-				case Uint16Array:
-					dracoArray = new draco.DracoUInt16Array();
-					decoder.GetAttributeUInt16ForAllPoints( dracoGeometry, attribute, dracoArray );
-					array = new Uint16Array( numValues );
-					break;
-
-				case Uint32Array:
-					dracoArray = new draco.DracoUInt32Array();
-					decoder.GetAttributeUInt32ForAllPoints( dracoGeometry, attribute, dracoArray );
-					array = new Uint32Array( numValues );
-					break;
-
-				default:
-					throw new Error( 'THREE.DRACOLoader: Unexpected attribute type.' );
-
-			}
-
-			for ( var i = 0; i < numValues; i ++ ) {
-
-				array[ i ] = dracoArray.GetValue( i );
-
-			}
-
-			draco.destroy( dracoArray );
-
-			return {
-				name: attributeName,
-				array: array,
-				itemSize: numComponents
-			};
-
-		}
-
-	};
-
-	DRACOLoader.taskCache = new WeakMap();
-
-	/** Deprecated static methods */
-
-	/** @deprecated */
-	DRACOLoader.setDecoderPath = function () {
-
-		console.warn( 'THREE.DRACOLoader: The .setDecoderPath() method has been removed. Use instance methods.' );
-
-	};
-
-	/** @deprecated */
-	DRACOLoader.setDecoderConfig = function () {
-
-		console.warn( 'THREE.DRACOLoader: The .setDecoderConfig() method has been removed. Use instance methods.' );
-
-	};
-
-	/** @deprecated */
-	DRACOLoader.releaseDecoderModule = function () {
-
-		console.warn( 'THREE.DRACOLoader: The .releaseDecoderModule() method has been removed. Use instance methods.' );
-
-	};
-
-	/** @deprecated */
-	DRACOLoader.getDecoderModule = function () {
-
-		console.warn( 'THREE.DRACOLoader: The .getDecoderModule() method has been removed. Use instance methods.' );
-
-	};
-
-	/**
-	 * @author qiao / https://github.com/qiao
-	 * @author mrdoob / http://mrdoob.com
-	 * @author alteredq / http://alteredqualia.com/
-	 * @author WestLangley / http://github.com/WestLangley
-	 * @author erich666 / http://erichaines.com
-	 * @author ScieCode / http://github.com/sciecode
-	 */
-
-	// This set of controls performs orbiting, dollying (zooming), and panning.
-	// Unlike TrackballControls, it maintains the "up" direction object.up (+Y by default).
-	//
-	//    Orbit - left mouse / touch: one-finger move
-	//    Zoom - middle mouse, or mousewheel / touch: two-finger spread or squish
-	//    Pan - right mouse, or left mouse + ctrl/meta/shiftKey, or arrow keys / touch: two-finger move
-
-	var OrbitControls = function ( object, domElement ) {
-
-		if ( domElement === undefined ) console.warn( 'THREE.OrbitControls: The second parameter "domElement" is now mandatory.' );
-		if ( domElement === document ) console.error( 'THREE.OrbitControls: "document" should not be used as the target "domElement". Please use "renderer.domElement" instead.' );
-
-		this.object = object;
-		this.domElement = domElement;
-
-		// Set to false to disable this control
-		this.enabled = true;
-
-		// "target" sets the location of focus, where the object orbits around
-		this.target = new Vector3();
-
-		// How far you can dolly in and out ( PerspectiveCamera only )
-		this.minDistance = 0;
-		this.maxDistance = Infinity;
-
-		// How far you can zoom in and out ( OrthographicCamera only )
-		this.minZoom = 0;
-		this.maxZoom = Infinity;
-
-		// How far you can orbit vertically, upper and lower limits.
-		// Range is 0 to Math.PI radians.
-		this.minPolarAngle = 0; // radians
-		this.maxPolarAngle = Math.PI; // radians
-
-		// How far you can orbit horizontally, upper and lower limits.
-		// If set, must be a sub-interval of the interval [ - Math.PI, Math.PI ].
-		this.minAzimuthAngle = - Infinity; // radians
-		this.maxAzimuthAngle = Infinity; // radians
-
-		// Set to true to enable damping (inertia)
-		// If damping is enabled, you must call controls.update() in your animation loop
-		this.enableDamping = false;
-		this.dampingFactor = 0.05;
-
-		// This option actually enables dollying in and out; left as "zoom" for backwards compatibility.
-		// Set to false to disable zooming
-		this.enableZoom = true;
-		this.zoomSpeed = 1.0;
-
-		// Set to false to disable rotating
-		this.enableRotate = true;
-		this.rotateSpeed = 1.0;
-
-		// Set to false to disable panning
-		this.enablePan = true;
-		this.panSpeed = 1.0;
-		this.screenSpacePanning = false; // if true, pan in screen-space
-		this.keyPanSpeed = 7.0;	// pixels moved per arrow key push
-
-		// Set to true to automatically rotate around the target
-		// If auto-rotate is enabled, you must call controls.update() in your animation loop
-		this.autoRotate = false;
-		this.autoRotateSpeed = 2.0; // 30 seconds per round when fps is 60
-
-		// Set to false to disable use of the keys
-		this.enableKeys = true;
-
-		// The four arrow keys
-		this.keys = { LEFT: 37, UP: 38, RIGHT: 39, BOTTOM: 40 };
-
-		// Mouse buttons
-		this.mouseButtons = { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN };
-
-		// Touch fingers
-		this.touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN };
-
-		// for reset
-		this.target0 = this.target.clone();
-		this.position0 = this.object.position.clone();
-		this.zoom0 = this.object.zoom;
-
-		//
-		// public methods
-		//
-
-		this.getPolarAngle = function () {
-
-			return spherical.phi;
-
-		};
-
-		this.getAzimuthalAngle = function () {
-
-			return spherical.theta;
-
-		};
-
-		this.saveState = function () {
-
-			scope.target0.copy( scope.target );
-			scope.position0.copy( scope.object.position );
-			scope.zoom0 = scope.object.zoom;
-
-		};
-
-		this.reset = function () {
-
-			scope.target.copy( scope.target0 );
-			scope.object.position.copy( scope.position0 );
-			scope.object.zoom = scope.zoom0;
-
-			scope.object.updateProjectionMatrix();
-			scope.dispatchEvent( changeEvent );
-
-			scope.update();
-
-			state = STATE.NONE;
-
-		};
-
-		// this method is exposed, but perhaps it would be better if we can make it private...
-		this.update = function () {
-
-			var offset = new Vector3();
-
-			// so camera.up is the orbit axis
-			var quat = new Quaternion().setFromUnitVectors( object.up, new Vector3( 0, 1, 0 ) );
-			var quatInverse = quat.clone().inverse();
-
-			var lastPosition = new Vector3();
-			var lastQuaternion = new Quaternion();
-
-			return function update() {
-
-				var position = scope.object.position;
-
-				offset.copy( position ).sub( scope.target );
-
-				// rotate offset to "y-axis-is-up" space
-				offset.applyQuaternion( quat );
-
-				// angle from z-axis around y-axis
-				spherical.setFromVector3( offset );
-
-				if ( scope.autoRotate && state === STATE.NONE ) {
-
-					rotateLeft( getAutoRotationAngle() );
-
-				}
-
-				if ( scope.enableDamping ) {
-
-					spherical.theta += sphericalDelta.theta * scope.dampingFactor;
-					spherical.phi += sphericalDelta.phi * scope.dampingFactor;
-
-				} else {
-
-					spherical.theta += sphericalDelta.theta;
-					spherical.phi += sphericalDelta.phi;
-
-				}
-
-				// restrict theta to be between desired limits
-				spherical.theta = Math.max( scope.minAzimuthAngle, Math.min( scope.maxAzimuthAngle, spherical.theta ) );
-
-				// restrict phi to be between desired limits
-				spherical.phi = Math.max( scope.minPolarAngle, Math.min( scope.maxPolarAngle, spherical.phi ) );
-
-				spherical.makeSafe();
-
-
-				spherical.radius *= scale;
-
-				// restrict radius to be between desired limits
-				spherical.radius = Math.max( scope.minDistance, Math.min( scope.maxDistance, spherical.radius ) );
-
-				// move target to panned location
-
-				if ( scope.enableDamping === true ) {
-
-					scope.target.addScaledVector( panOffset, scope.dampingFactor );
-
-				} else {
-
-					scope.target.add( panOffset );
-
-				}
-
-				offset.setFromSpherical( spherical );
-
-				// rotate offset back to "camera-up-vector-is-up" space
-				offset.applyQuaternion( quatInverse );
-
-				position.copy( scope.target ).add( offset );
-
-				scope.object.lookAt( scope.target );
-
-				if ( scope.enableDamping === true ) {
-
-					sphericalDelta.theta *= ( 1 - scope.dampingFactor );
-					sphericalDelta.phi *= ( 1 - scope.dampingFactor );
-
-					panOffset.multiplyScalar( 1 - scope.dampingFactor );
-
-				} else {
-
-					sphericalDelta.set( 0, 0, 0 );
-
-					panOffset.set( 0, 0, 0 );
-
-				}
-
-				scale = 1;
-
-				// update condition is:
-				// min(camera displacement, camera rotation in radians)^2 > EPS
-				// using small-angle approximation cos(x/2) = 1 - x^2 / 8
-
-				if ( zoomChanged ||
-					lastPosition.distanceToSquared( scope.object.position ) > EPS ||
-					8 * ( 1 - lastQuaternion.dot( scope.object.quaternion ) ) > EPS ) {
-
-					scope.dispatchEvent( changeEvent );
-
-					lastPosition.copy( scope.object.position );
-					lastQuaternion.copy( scope.object.quaternion );
-					zoomChanged = false;
-
-					return true;
-
-				}
-
-				return false;
-
-			};
-
-		}();
-
-		this.dispose = function () {
-
-			scope.domElement.removeEventListener( 'contextmenu', onContextMenu, false );
-			scope.domElement.removeEventListener( 'mousedown', onMouseDown, false );
-			scope.domElement.removeEventListener( 'wheel', onMouseWheel, false );
-
-			scope.domElement.removeEventListener( 'touchstart', onTouchStart, false );
-			scope.domElement.removeEventListener( 'touchend', onTouchEnd, false );
-			scope.domElement.removeEventListener( 'touchmove', onTouchMove, false );
-
-			document.removeEventListener( 'mousemove', onMouseMove, false );
-			document.removeEventListener( 'mouseup', onMouseUp, false );
-
-			scope.domElement.removeEventListener( 'keydown', onKeyDown, false );
-
-			//scope.dispatchEvent( { type: 'dispose' } ); // should this be added here?
-
-		};
-
-		//
-		// internals
-		//
-
-		var scope = this;
-
-		var changeEvent = { type: 'change' };
-		var startEvent = { type: 'start' };
-		var endEvent = { type: 'end' };
-
-		var STATE = {
-			NONE: - 1,
-			ROTATE: 0,
-			DOLLY: 1,
-			PAN: 2,
-			TOUCH_ROTATE: 3,
-			TOUCH_PAN: 4,
-			TOUCH_DOLLY_PAN: 5,
-			TOUCH_DOLLY_ROTATE: 6
-		};
-
-		var state = STATE.NONE;
-
-		var EPS = 0.000001;
-
-		// current position in spherical coordinates
-		var spherical = new Spherical();
-		var sphericalDelta = new Spherical();
-
-		var scale = 1;
-		var panOffset = new Vector3();
-		var zoomChanged = false;
-
-		var rotateStart = new Vector2();
-		var rotateEnd = new Vector2();
-		var rotateDelta = new Vector2();
-
-		var panStart = new Vector2();
-		var panEnd = new Vector2();
-		var panDelta = new Vector2();
-
-		var dollyStart = new Vector2();
-		var dollyEnd = new Vector2();
-		var dollyDelta = new Vector2();
-
-		function getAutoRotationAngle() {
-
-			return 2 * Math.PI / 60 / 60 * scope.autoRotateSpeed;
-
-		}
-
-		function getZoomScale() {
-
-			return Math.pow( 0.95, scope.zoomSpeed );
-
-		}
-
-		function rotateLeft( angle ) {
-
-			sphericalDelta.theta -= angle;
-
-		}
-
-		function rotateUp( angle ) {
-
-			sphericalDelta.phi -= angle;
-
-		}
-
-		var panLeft = function () {
-
-			var v = new Vector3();
-
-			return function panLeft( distance, objectMatrix ) {
-
-				v.setFromMatrixColumn( objectMatrix, 0 ); // get X column of objectMatrix
-				v.multiplyScalar( - distance );
-
-				panOffset.add( v );
-
-			};
-
-		}();
-
-		var panUp = function () {
-
-			var v = new Vector3();
-
-			return function panUp( distance, objectMatrix ) {
-
-				if ( scope.screenSpacePanning === true ) {
-
-					v.setFromMatrixColumn( objectMatrix, 1 );
-
-				} else {
-
-					v.setFromMatrixColumn( objectMatrix, 0 );
-					v.crossVectors( scope.object.up, v );
-
-				}
-
-				v.multiplyScalar( distance );
-
-				panOffset.add( v );
-
-			};
-
-		}();
-
-		// deltaX and deltaY are in pixels; right and down are positive
-		var pan = function () {
-
-			var offset = new Vector3();
-
-			return function pan( deltaX, deltaY ) {
-
-				var element = scope.domElement;
-
-				if ( scope.object.isPerspectiveCamera ) {
-
-					// perspective
-					var position = scope.object.position;
-					offset.copy( position ).sub( scope.target );
-					var targetDistance = offset.length();
-
-					// half of the fov is center to top of screen
-					targetDistance *= Math.tan( ( scope.object.fov / 2 ) * Math.PI / 180.0 );
-
-					// we use only clientHeight here so aspect ratio does not distort speed
-					panLeft( 2 * deltaX * targetDistance / element.clientHeight, scope.object.matrix );
-					panUp( 2 * deltaY * targetDistance / element.clientHeight, scope.object.matrix );
-
-				} else if ( scope.object.isOrthographicCamera ) {
-
-					// orthographic
-					panLeft( deltaX * ( scope.object.right - scope.object.left ) / scope.object.zoom / element.clientWidth, scope.object.matrix );
-					panUp( deltaY * ( scope.object.top - scope.object.bottom ) / scope.object.zoom / element.clientHeight, scope.object.matrix );
-
-				} else {
-
-					// camera neither orthographic nor perspective
-					console.warn( 'WARNING: OrbitControls.js encountered an unknown camera type - pan disabled.' );
-					scope.enablePan = false;
-
-				}
-
-			};
-
-		}();
-
-		function dollyOut( dollyScale ) {
-
-			if ( scope.object.isPerspectiveCamera ) {
-
-				scale /= dollyScale;
-
-			} else if ( scope.object.isOrthographicCamera ) {
-
-				scope.object.zoom = Math.max( scope.minZoom, Math.min( scope.maxZoom, scope.object.zoom * dollyScale ) );
-				scope.object.updateProjectionMatrix();
-				zoomChanged = true;
-
-			} else {
-
-				console.warn( 'WARNING: OrbitControls.js encountered an unknown camera type - dolly/zoom disabled.' );
-				scope.enableZoom = false;
-
-			}
-
-		}
-
-		function dollyIn( dollyScale ) {
-
-			if ( scope.object.isPerspectiveCamera ) {
-
-				scale *= dollyScale;
-
-			} else if ( scope.object.isOrthographicCamera ) {
-
-				scope.object.zoom = Math.max( scope.minZoom, Math.min( scope.maxZoom, scope.object.zoom / dollyScale ) );
-				scope.object.updateProjectionMatrix();
-				zoomChanged = true;
-
-			} else {
-
-				console.warn( 'WARNING: OrbitControls.js encountered an unknown camera type - dolly/zoom disabled.' );
-				scope.enableZoom = false;
-
-			}
-
-		}
-
-		//
-		// event callbacks - update the object state
-		//
-
-		function handleMouseDownRotate( event ) {
-
-			rotateStart.set( event.clientX, event.clientY );
-
-		}
-
-		function handleMouseDownDolly( event ) {
-
-			dollyStart.set( event.clientX, event.clientY );
-
-		}
-
-		function handleMouseDownPan( event ) {
-
-			panStart.set( event.clientX, event.clientY );
-
-		}
-
-		function handleMouseMoveRotate( event ) {
-
-			rotateEnd.set( event.clientX, event.clientY );
-
-			rotateDelta.subVectors( rotateEnd, rotateStart ).multiplyScalar( scope.rotateSpeed );
-
-			var element = scope.domElement;
-
-			rotateLeft( 2 * Math.PI * rotateDelta.x / element.clientHeight ); // yes, height
-
-			rotateUp( 2 * Math.PI * rotateDelta.y / element.clientHeight );
-
-			rotateStart.copy( rotateEnd );
-
-			scope.update();
-
-		}
-
-		function handleMouseMoveDolly( event ) {
-
-			dollyEnd.set( event.clientX, event.clientY );
-
-			dollyDelta.subVectors( dollyEnd, dollyStart );
-
-			if ( dollyDelta.y > 0 ) {
-
-				dollyOut( getZoomScale() );
-
-			} else if ( dollyDelta.y < 0 ) {
-
-				dollyIn( getZoomScale() );
-
-			}
-
-			dollyStart.copy( dollyEnd );
-
-			scope.update();
-
-		}
-
-		function handleMouseMovePan( event ) {
-
-			panEnd.set( event.clientX, event.clientY );
-
-			panDelta.subVectors( panEnd, panStart ).multiplyScalar( scope.panSpeed );
-
-			pan( panDelta.x, panDelta.y );
-
-			panStart.copy( panEnd );
-
-			scope.update();
-
-		}
-
-		function handleMouseWheel( event ) {
-
-			if ( event.deltaY < 0 ) {
-
-				dollyIn( getZoomScale() );
-
-			} else if ( event.deltaY > 0 ) {
-
-				dollyOut( getZoomScale() );
-
-			}
-
-			scope.update();
-
-		}
-
-		function handleKeyDown( event ) {
-
-			var needsUpdate = false;
-
-			switch ( event.keyCode ) {
-
-				case scope.keys.UP:
-					pan( 0, scope.keyPanSpeed );
-					needsUpdate = true;
-					break;
-
-				case scope.keys.BOTTOM:
-					pan( 0, - scope.keyPanSpeed );
-					needsUpdate = true;
-					break;
-
-				case scope.keys.LEFT:
-					pan( scope.keyPanSpeed, 0 );
-					needsUpdate = true;
-					break;
-
-				case scope.keys.RIGHT:
-					pan( - scope.keyPanSpeed, 0 );
-					needsUpdate = true;
-					break;
-
-			}
-
-			if ( needsUpdate ) {
-
-				// prevent the browser from scrolling on cursor keys
-				event.preventDefault();
-
-				scope.update();
-
-			}
-
-
-		}
-
-		function handleTouchStartRotate( event ) {
-
-			if ( event.touches.length == 1 ) {
-
-				rotateStart.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
-
-			} else {
-
-				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
-				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
-
-				rotateStart.set( x, y );
-
-			}
-
-		}
-
-		function handleTouchStartPan( event ) {
-
-			if ( event.touches.length == 1 ) {
-
-				panStart.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
-
-			} else {
-
-				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
-				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
-
-				panStart.set( x, y );
-
-			}
-
-		}
-
-		function handleTouchStartDolly( event ) {
-
-			var dx = event.touches[ 0 ].pageX - event.touches[ 1 ].pageX;
-			var dy = event.touches[ 0 ].pageY - event.touches[ 1 ].pageY;
-
-			var distance = Math.sqrt( dx * dx + dy * dy );
-
-			dollyStart.set( 0, distance );
-
-		}
-
-		function handleTouchStartDollyPan( event ) {
-
-			if ( scope.enableZoom ) handleTouchStartDolly( event );
-
-			if ( scope.enablePan ) handleTouchStartPan( event );
-
-		}
-
-		function handleTouchStartDollyRotate( event ) {
-
-			if ( scope.enableZoom ) handleTouchStartDolly( event );
-
-			if ( scope.enableRotate ) handleTouchStartRotate( event );
-
-		}
-
-		function handleTouchMoveRotate( event ) {
-
-			if ( event.touches.length == 1 ) {
-
-				rotateEnd.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
-
-			} else {
-
-				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
-				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
-
-				rotateEnd.set( x, y );
-
-			}
-
-			rotateDelta.subVectors( rotateEnd, rotateStart ).multiplyScalar( scope.rotateSpeed );
-
-			var element = scope.domElement;
-
-			rotateLeft( 2 * Math.PI * rotateDelta.x / element.clientHeight ); // yes, height
-
-			rotateUp( 2 * Math.PI * rotateDelta.y / element.clientHeight );
-
-			rotateStart.copy( rotateEnd );
-
-		}
-
-		function handleTouchMovePan( event ) {
-
-			if ( event.touches.length == 1 ) {
-
-				panEnd.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
-
-			} else {
-
-				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
-				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
-
-				panEnd.set( x, y );
-
-			}
-
-			panDelta.subVectors( panEnd, panStart ).multiplyScalar( scope.panSpeed );
-
-			pan( panDelta.x, panDelta.y );
-
-			panStart.copy( panEnd );
-
-		}
-
-		function handleTouchMoveDolly( event ) {
-
-			var dx = event.touches[ 0 ].pageX - event.touches[ 1 ].pageX;
-			var dy = event.touches[ 0 ].pageY - event.touches[ 1 ].pageY;
-
-			var distance = Math.sqrt( dx * dx + dy * dy );
-
-			dollyEnd.set( 0, distance );
-
-			dollyDelta.set( 0, Math.pow( dollyEnd.y / dollyStart.y, scope.zoomSpeed ) );
-
-			dollyOut( dollyDelta.y );
-
-			dollyStart.copy( dollyEnd );
-
-		}
-
-		function handleTouchMoveDollyPan( event ) {
-
-			if ( scope.enableZoom ) handleTouchMoveDolly( event );
-
-			if ( scope.enablePan ) handleTouchMovePan( event );
-
-		}
-
-		function handleTouchMoveDollyRotate( event ) {
-
-			if ( scope.enableZoom ) handleTouchMoveDolly( event );
-
-			if ( scope.enableRotate ) handleTouchMoveRotate( event );
-
-		}
-
-		//
-		// event handlers - FSM: listen for events and reset state
-		//
-
-		function onMouseDown( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			// Prevent the browser from scrolling.
-			event.preventDefault();
-
-			// Manually set the focus since calling preventDefault above
-			// prevents the browser from setting it automatically.
-
-			scope.domElement.focus ? scope.domElement.focus() : window.focus();
-
-			var mouseAction;
-
-			switch ( event.button ) {
-
-				case 0:
-
-					mouseAction = scope.mouseButtons.LEFT;
-					break;
-
-				case 1:
-
-					mouseAction = scope.mouseButtons.MIDDLE;
-					break;
-
-				case 2:
-
-					mouseAction = scope.mouseButtons.RIGHT;
-					break;
-
-				default:
-
-					mouseAction = - 1;
-
-			}
-
-			switch ( mouseAction ) {
-
-				case MOUSE.DOLLY:
-
-					if ( scope.enableZoom === false ) return;
-
-					handleMouseDownDolly( event );
-
-					state = STATE.DOLLY;
-
-					break;
-
-				case MOUSE.ROTATE:
-
-					if ( event.ctrlKey || event.metaKey || event.shiftKey ) {
-
-						if ( scope.enablePan === false ) return;
-
-						handleMouseDownPan( event );
-
-						state = STATE.PAN;
-
-					} else {
-
-						if ( scope.enableRotate === false ) return;
-
-						handleMouseDownRotate( event );
-
-						state = STATE.ROTATE;
-
-					}
-
-					break;
-
-				case MOUSE.PAN:
-
-					if ( event.ctrlKey || event.metaKey || event.shiftKey ) {
-
-						if ( scope.enableRotate === false ) return;
-
-						handleMouseDownRotate( event );
-
-						state = STATE.ROTATE;
-
-					} else {
-
-						if ( scope.enablePan === false ) return;
-
-						handleMouseDownPan( event );
-
-						state = STATE.PAN;
-
-					}
-
-					break;
-
-				default:
-
-					state = STATE.NONE;
-
-			}
-
-			if ( state !== STATE.NONE ) {
-
-				document.addEventListener( 'mousemove', onMouseMove, false );
-				document.addEventListener( 'mouseup', onMouseUp, false );
-
-				scope.dispatchEvent( startEvent );
-
-			}
-
-		}
-
-		function onMouseMove( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			event.preventDefault();
-
-			switch ( state ) {
-
-				case STATE.ROTATE:
-
-					if ( scope.enableRotate === false ) return;
-
-					handleMouseMoveRotate( event );
-
-					break;
-
-				case STATE.DOLLY:
-
-					if ( scope.enableZoom === false ) return;
-
-					handleMouseMoveDolly( event );
-
-					break;
-
-				case STATE.PAN:
-
-					if ( scope.enablePan === false ) return;
-
-					handleMouseMovePan( event );
-
-					break;
-
-			}
-
-		}
-
-		function onMouseUp( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			document.removeEventListener( 'mousemove', onMouseMove, false );
-			document.removeEventListener( 'mouseup', onMouseUp, false );
-
-			scope.dispatchEvent( endEvent );
-
-			state = STATE.NONE;
-
-		}
-
-		function onMouseWheel( event ) {
-
-			if ( scope.enabled === false || scope.enableZoom === false || ( state !== STATE.NONE && state !== STATE.ROTATE ) ) return;
-
-			event.preventDefault();
-			event.stopPropagation();
-
-			scope.dispatchEvent( startEvent );
-
-			handleMouseWheel( event );
-
-			scope.dispatchEvent( endEvent );
-
-		}
-
-		function onKeyDown( event ) {
-
-			if ( scope.enabled === false || scope.enableKeys === false || scope.enablePan === false ) return;
-
-			handleKeyDown( event );
-
-		}
-
-		function onTouchStart( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			event.preventDefault(); // prevent scrolling
-
-			switch ( event.touches.length ) {
-
-				case 1:
-
-					switch ( scope.touches.ONE ) {
-
-						case TOUCH.ROTATE:
-
-							if ( scope.enableRotate === false ) return;
-
-							handleTouchStartRotate( event );
-
-							state = STATE.TOUCH_ROTATE;
-
-							break;
-
-						case TOUCH.PAN:
-
-							if ( scope.enablePan === false ) return;
-
-							handleTouchStartPan( event );
-
-							state = STATE.TOUCH_PAN;
-
-							break;
-
-						default:
-
-							state = STATE.NONE;
-
-					}
-
-					break;
-
-				case 2:
-
-					switch ( scope.touches.TWO ) {
-
-						case TOUCH.DOLLY_PAN:
-
-							if ( scope.enableZoom === false && scope.enablePan === false ) return;
-
-							handleTouchStartDollyPan( event );
-
-							state = STATE.TOUCH_DOLLY_PAN;
-
-							break;
-
-						case TOUCH.DOLLY_ROTATE:
-
-							if ( scope.enableZoom === false && scope.enableRotate === false ) return;
-
-							handleTouchStartDollyRotate( event );
-
-							state = STATE.TOUCH_DOLLY_ROTATE;
-
-							break;
-
-						default:
-
-							state = STATE.NONE;
-
-					}
-
-					break;
-
-				default:
-
-					state = STATE.NONE;
-
-			}
-
-			if ( state !== STATE.NONE ) {
-
-				scope.dispatchEvent( startEvent );
-
-			}
-
-		}
-
-		function onTouchMove( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			event.preventDefault(); // prevent scrolling
-			event.stopPropagation();
-
-			switch ( state ) {
-
-				case STATE.TOUCH_ROTATE:
-
-					if ( scope.enableRotate === false ) return;
-
-					handleTouchMoveRotate( event );
-
-					scope.update();
-
-					break;
-
-				case STATE.TOUCH_PAN:
-
-					if ( scope.enablePan === false ) return;
-
-					handleTouchMovePan( event );
-
-					scope.update();
-
-					break;
-
-				case STATE.TOUCH_DOLLY_PAN:
-
-					if ( scope.enableZoom === false && scope.enablePan === false ) return;
-
-					handleTouchMoveDollyPan( event );
-
-					scope.update();
-
-					break;
-
-				case STATE.TOUCH_DOLLY_ROTATE:
-
-					if ( scope.enableZoom === false && scope.enableRotate === false ) return;
-
-					handleTouchMoveDollyRotate( event );
-
-					scope.update();
-
-					break;
-
-				default:
-
-					state = STATE.NONE;
-
-			}
-
-		}
-
-		function onTouchEnd( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			scope.dispatchEvent( endEvent );
-
-			state = STATE.NONE;
-
-		}
-
-		function onContextMenu( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			event.preventDefault();
-
-		}
-
-		//
-
-		scope.domElement.addEventListener( 'contextmenu', onContextMenu, false );
-
-		scope.domElement.addEventListener( 'mousedown', onMouseDown, false );
-		scope.domElement.addEventListener( 'wheel', onMouseWheel, false );
-
-		scope.domElement.addEventListener( 'touchstart', onTouchStart, false );
-		scope.domElement.addEventListener( 'touchend', onTouchEnd, false );
-		scope.domElement.addEventListener( 'touchmove', onTouchMove, false );
-
-		scope.domElement.addEventListener( 'keydown', onKeyDown, false );
-
-		// make sure element can receive keys.
-
-		if ( scope.domElement.tabIndex === - 1 ) {
-
-			scope.domElement.tabIndex = 0;
-
-		}
-
-		// force an update at start
-
-		this.update();
-
-	};
-
-	OrbitControls.prototype = Object.create( EventDispatcher.prototype );
-	OrbitControls.prototype.constructor = OrbitControls;
-
-
-	// This set of controls performs orbiting, dollying (zooming), and panning.
-	// Unlike TrackballControls, it maintains the "up" direction object.up (+Y by default).
-	// This is very similar to OrbitControls, another set of touch behavior
-	//
-	//    Orbit - right mouse, or left mouse + ctrl/meta/shiftKey / touch: two-finger rotate
-	//    Zoom - middle mouse, or mousewheel / touch: two-finger spread or squish
-	//    Pan - left mouse, or arrow keys / touch: one-finger move
-
-	var MapControls = function ( object, domElement ) {
-
-		OrbitControls.call( this, object, domElement );
-
-		this.mouseButtons.LEFT = MOUSE.PAN;
-		this.mouseButtons.RIGHT = MOUSE.ROTATE;
-
-		this.touches.ONE = TOUCH.PAN;
-		this.touches.TWO = TOUCH.DOLLY_ROTATE;
-
-	};
-
-	MapControls.prototype = Object.create( EventDispatcher.prototype );
-	MapControls.prototype.constructor = MapControls;
-
-	class Queue {
-	    constructor() { 
-	        this.items = []; 
-	    } 
-	    enqueue(item) {
-	        this.items.push(item); 
-	    }
-	    dequeue() {
-	        if(this.isEmpty()) 
-	            return "Underflow"; 
-	        return this.items.shift();
-	    }
-	    front() {
-	        if(this.isEmpty()) 
-	            return "No elements in Queue"; 
-	        return this.items[0]; 
-	    } 
-	    isEmpty() {
-	        return this.items.length == 0; 
-	    } 
-	    printQueue() {
-	        var str = ""; 
-	        for(var i = 0; i < this.items.length; i++) 
-	            str += this.items[i] +" "; 
-	        return str; 
-	    } 
+	function exportGLTF(name, scene) {
+	    var gltfExporter = new GLTFExporter();
+
+	    gltfExporter.parse(scene, function ( result ) {
+	        if ( result instanceof ArrayBuffer ) {
+	            saveArrayBuffer(result, name+'.glb');
+	        } else {
+	            var output = JSON.stringify(result, null, 2);
+	            saveString(output, name+'.glb');
+	        }
+	    }, {binary: true} );
+	}
+
+	var link = document.createElement('a');
+	link.style.display = 'none';
+	document.body.appendChild(link); // Firefox workaround, see #6594
+
+	function save(blob, filename) {
+	    link.href = URL.createObjectURL(blob);
+	    link.download = filename;
+	    link.click();
+	}
+
+	function saveString(text, filename) {
+	    save(new Blob([text], {type: 'text/plain'}), filename);
+	}
+
+	function saveArrayBuffer(buffer,filename) {
+	    save(new Blob([buffer], {type: 'application/octet-stream'}), filename);
 	}
 
 	var scene, camera, renderer, controls, grid;
 	var lights = new Array(8);
-	var model;
-	var structure = [];
-	var structure_dict = new Map();
-	var init_scale;
+	var models = [];
 
 	function init() {
 	    // create the gray scene
@@ -57379,8 +57407,9 @@
 	    renderer.render(scene, camera);
 	}
 
-	function display_kind(data) {
+	function display(name, data) {
 	    const dracoLoader = new DRACOLoader();
+
 	    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
 	    dracoLoader.setDecoderConfig({ type: 'js' });
 	    
@@ -57388,143 +57417,206 @@
 	    gltfloader.setDRACOLoader(dracoLoader);
 
 	    gltfloader.load(data, function (gltf) {
-	        model = gltf.scene;
+	        let model = gltf.scene;
 	        scene.add(model);
-	        structure = bfs(model);
-	        addToMenu(structure);
-	        init_scale = model.scale.clone();
+	        models.push(new Model(model, name, model.scale.clone(), bfs(model)));
 	    });
-	}
-
-	function addToMenu(list){
-	    var menu = document.getElementById('selection-list');
-	    createDictionary(list);
-	    list.forEach(l => {
-	        let option = document.createElement('option');
-	        option.text = l.obj.name + ' (' + l.obj.type + ')', l.obj.name;
-	        menu.add(option);   
-	    });
-	}
-
-	function createDictionary(list) {
-	    list.forEach(l =>{
-	        structure_dict.set(l.obj.name + ' (' + l.obj.type + ')', l.obj.id);
-	    });
-	}
-
-	function change_color(name, color) {
-	    model.getObjectById(structure_dict.get(name)).material.color.set(color);
-	}
-
-	function change_scale(value) {
-	    let x = init_scale.x*parseFloat(value);
-	    let y = init_scale.y*parseFloat(value);
-	    let z = init_scale.z*parseFloat(value);
-	    model.scale.set(x, y, z);
-	}
-
-	function change_transparency(name, value) {
-	    let obj_id = structure_dict.get(name);
-	    model.getObjectById(obj_id).material.transparent = value > 0 ? true : false;
-	    model.getObjectById(obj_id).material.opacity = 1 - value;
-	}
-
-	function getTrancparencyValue(name) {
-	    let obj_id = structure_dict.get(name);
-	    return (1 - model.getObjectById(obj_id).material.opacity).toFixed(2);
-	}
-
-
-
-
-
-
-
-
-
-
-	function exportGLTF(name) {
-	    var gltfExporter = new GLTFExporter();
-
-	    gltfExporter.parse(model, function ( result ) {
-	        if ( result instanceof ArrayBuffer ) {
-	            saveArrayBuffer(result, name+'.glb');
-	        } else {
-	            var output = JSON.stringify(result, null, 2);
-	            saveString(output, name+'.glb');
-	        }
-	    }, {binary: true} );
-	}
-
-	var link = document.createElement('a');
-	link.style.display = 'none';
-	document.body.appendChild(link); // Firefox workaround, see #6594
-
-	function save(blob, filename) {
-	    link.href = URL.createObjectURL(blob);
-	    link.download = filename;
-	    link.click();
-	}
-
-	function saveString(text, filename) {
-	    save(new Blob([text], {type: 'text/plain'}), filename);
-	}
-
-	function saveArrayBuffer(buffer,filename) {
-	    save(new Blob([buffer], {type: 'application/octet-stream'}), filename);
 	}
 
 	function bfs(model) {
-	    let list = [];
-
 	    let queue = new Queue();
-	    queue.enqueue(new Node$1(model, null));
-	    list.push(new Node$1(model, null));
+	    let list = [];
+	    parent = new Node$1(model, null,  0);
+	    list.push(parent);
+	    queue.enqueue(parent);
 	    
 	    while (queue.isEmpty() == false) {
 	        let c = queue.dequeue();
 	        if (c.obj.children.length > 0) {
 	            c.obj.children.forEach(child => {
-	                queue.enqueue(new Node$1(child, c.obj));
-	                list.push(new Node$1(child, c.obj));
+	                let node_child = new Node$1(child, c.obj, 0);
+	                c.children.push(node_child);
+	                queue.enqueue(node_child);
+	                list.push(node_child);
 	            });
 	        }
 	    }
 	    return list;
 	}
 
+	function getModelByName(name) {
+	    let res;
+	    models.forEach(m => {
+	        if (m.name == name) res = m;
+	    });
+	    return res;
+	}
+
+	function updateListOfInternals(menu, model_name) {
+	    menu.innerHTML = "";
+	    let tree = getModelByName(model_name).tree;
+	    tree.forEach(t => {
+	        let option = document.createElement('option');
+	        option.text = t.obj.name + ' (' + t.obj.type + ')', t.obj.name;
+	        menu.add(option);
+	    });
+	}
+
+	function change_scale(model_name, value) {
+	    let model;
+	    model = getModelByName(model_name);
+	    if (model != undefined) {
+	        let init_scale = model.init_scale;
+	        let x = init_scale.x*parseFloat(value);
+	        let y = init_scale.y*parseFloat(value);
+	        let z = init_scale.z*parseFloat(value);
+	        model.model.scale.set(x, y, z);
+	        model.scale = value;
+	    }
+	}
+
+	function change_position(model_name, {x, y, z}) {
+	    let model = getModelByName(model_name);
+	    if (model != undefined) {
+	        let init_scale = model.init_scale;
+	        model.model.position.set(init_scale.x*parseFloat(x), init_scale.y*parseFloat(y), init_scale.z*parseFloat(z));
+	    }
+	}
+
+	function change_color(model_name, mesh_name, color) {
+	    let model = getModelByName(model_name);
+	    if (model != undefined) {
+	        model.model.getObjectById(model.structure.get(mesh_name)).material.color.set(color);
+	    }
+	    
+	}
+
+	function change_transparency(model_name, mesh_name, value) {
+	    let model = getModelByName(model_name);
+	    if (model != undefined) {
+	        let id = model.structure.get(mesh_name);
+	        model.model.getObjectById(id).material.transparent = value > 0 ? true : false;
+	        model.model.getObjectById(id).material.opacity = 1 - value;   
+	    }
+	}
+
+	function getTrancparencyValue(model_name, mesh_name) {
+	    let model = getModelByName(model_name);
+	    if (model != undefined) {
+	        let id = model.structure.get(mesh_name);
+	        return (1 - model.model.getObjectById(id).material.opacity).toFixed(2);
+	    }
+	    return null;
+	}
+
+	function getScaleValue(model_name){
+	    let model = getModelByName(model_name);
+	    return (model != undefined) ? model.scale : null;
+	}
+
+	function getPosition(model_name){
+	    let model = getModelByName(model_name);
+	    if (model != undefined) {
+	        let pos = model.model.position;
+	        let vector = new Vector3(pos.x.toFixed(2), pos.y.toFixed(2), pos.z.toFixed(2));
+	        return vector;
+	    }
+	    return null;
+	}
+
+	function save_scene() {
+	    let new_scene = new Group();
+	    models.forEach(m => {
+	        new_scene.children.push(m.model);
+	        new_scene.children[new_scene.children.length-1].name = name.slice(0, m.name.length - 4);
+	    });
+	    exportGLTF('scene', new_scene.children); 
+	}
+
+	class Model {
+	    constructor(model, name, init_scale, tree) {
+	        this.model = model;
+	        this.name = name;
+	        this.init_scale = init_scale;
+	        this.tree = tree;
+	        this.structure = this.createDictionary(tree); // mapping: name (type) |-> id
+	        this.scale = 1;
+	    }
+	    
+	    createDictionary(list) {
+	        let structure_dict = new Map();
+	        list.forEach(l =>{
+	            structure_dict.set(l.obj.name + ' (' + l.obj.type + ')', l.obj.id);
+	        });
+	        return structure_dict;
+	    }
+	}
+
 	class Node$1 {
-	    constructor(obj, parent){
+	    constructor(obj, parent, depth) {
 	        this.obj = obj;
 	        this.parent = parent;
+	        this.depth = depth;
+	        this.children = [];
 	    }
 	}
 
 	init();
 
 	document.getElementById('file-submission').addEventListener('click', function() {
-	    var file = document.getElementById('file-selector').files[0];
-	    display_kind(URL.createObjectURL(file, { type: 'model/gltf-binary' }));
+	    var files = document.getElementById('file-selector').files;
+	    for (let i = 0; i < files.length; i++){
+	        display(files[i].name, URL.createObjectURL(files[i], { type: 'model/gltf-binary' }));
+	        let menu = document.getElementById('model-selection-list');
+	        let option = document.createElement('option');
+	        option.text = files[i].name;
+	        menu.add(option);
+	    }
 	});
 
-	document.getElementById('selection-list').addEventListener('click', function() {
-	    document.getElementById('transparency-value').value = getTrancparencyValue(this.value);
+	document.getElementById('model-selection-list').addEventListener('click', function() {
+	    updateListOfInternals(document.getElementById('part-selection-list'), this.value);
+	    document.getElementById('scale-value').value = getScaleValue(document.getElementById('model-selection-list').value);
+	    
+	    let vector = getPosition(this.value);
+	    document.getElementById('pos-x').value = vector.x;
+	    document.getElementById('pos-y').value = vector.y;
+	    document.getElementById('pos-z').value = vector.z;
+	});
+
+	document.getElementById('part-selection-list').addEventListener('click', function() {
+	    document.getElementById('transparency-value').value = getTrancparencyValue(document.getElementById('model-selection-list').value, this.value);
 	});
 
 	acolorpicker.from('.picker').on('change', (picker, color) => {
-	    change_color(document.getElementById('selection-list').value, color);
+	    change_color(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, color);
 	});
 
 	document.getElementById('transparency-value').addEventListener('change', function() {
-	    change_transparency(document.getElementById('selection-list').value, this.value);
+	    change_transparency(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
 	});
 
 	document.getElementById('scale-value').addEventListener('change', function() {
-	    change_scale(this.value);
+	    change_scale(document.getElementById('model-selection-list').value, this.value);
 	});
 
 	document.getElementById('save-file').addEventListener('click', function() {
-	    exportGLTF('changed_kind');
+	    save_scene();
+	});
+
+	document.getElementById('pos-x').addEventListener('change', function() {
+	    change_position(document.getElementById('model-selection-list').value, 
+	                {x: this.value, y: document.getElementById('pos-y').value, z: document.getElementById('pos-z').value});
+	});
+
+	document.getElementById('pos-y').addEventListener('change', function() {
+	    change_position(document.getElementById('model-selection-list').value, 
+	    {x: document.getElementById('pos-x').value, y: this.value, z: document.getElementById('pos-z').value});
+	});
+
+	document.getElementById('pos-z').addEventListener('change', function() {
+	    change_position(document.getElementById('model-selection-list').value,
+	    {x: document.getElementById('pos-x').value, y: document.getElementById('pos-y').value, z: this.value});
 	});
 
 }());

@@ -2,48 +2,29 @@
 <html>
 	<head>
 		<meta charset='utf-8'>
-		<title>Dobryi vecher</title>
+		<title>internship'20</title>
 		<style>
 			.menuleftcontent{
 				float: left;
-				margin: 8px;
-				width: 230px;
-			}
-			.dropdown{
-				width: 100%;
+				width: 17.4%;
+				margin-right: 15px;
 			}
 			.container{
 				float: right;
-				width: 1030px;
-				height: 570px;
-				margin: 15px;
-				margin-right: 25px;
-				margin-left: 0px;
+				width: 80%;
+				height: 600px;
+				margin-top: 5px;
 			}
 			.picker {
 				display: inline-block;
-				margin: 5px;
-				box-shadow: 0 2px 2px 0 rgba(0,0,0,0.16), 0 0 0 1px rgba(3, 1, 1, 0.08);
+				padding: 5px 0px 5px;
 			}
 			.part {
 				display: inline-block;
 				padding: 5px 10px 5px;
-				width: 210px;
-				margin: 5px;
-				box-shadow: 2px 2px 2px 2px rgba(0,0,0,0.16), 1px 1px 1px 1px rgba(3, 1, 1, 0.08);
-			}
-			.take-all {
 				width: 100%;
-				height: 25px;
 				margin: 5px;
 				box-shadow: 2px 2px 2px 2px rgba(0,0,0,0.16), 1px 1px 1px 1px rgba(3, 1, 1, 0.08);
-			}
-			.small {
-				margin: 3px;
-				width: 45px;
-			}
-			.submit-button {
-				margin-top: 4px;
 			}
 		</style>
 	</head>
@@ -51,30 +32,40 @@
 		<span class='menuleftcontent'>
 			<span class='part'>
 				<input type='file' id='file-selector' accept='.glb' change='onChange' multiple>
-				<input type='button' class='submit-button' id='file-submission' value='Submit'>
+				<input type='button' style='width: 100%; margin-top: 4px' id='file-submission' value='Submit Files'>
+				<input type='button' style='width: 100%; margin-top: 4px' id='save-file' value='Save the Scene'>
 			</span>
 
 			<span class='part'>
 				<div>
-					<label for='scale-value' style='font-family:Arial, Helvetica, sans-serif; font-size:15px'>Scaling factor</label>
-					<input type='number' class='small' id='scale-value' min='0.01' max='10' value='1' step='0.01'>
+					<select id='model-selection-list' style='width: 100%' style='margin-bottom: 3px'>
+						<option>Choose a model</option>
+					</select> 
+					<label for='scale-value' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Scaling factor</label>
+					<input type='number' style='margin: 3px; width: 45px;' id='scale-value' min='0.01' max='10' value='1' step='0.01'>
+					<div>
+						<label for='pos-x' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>X</label>
+						<input type='number' style='margin: 4px; width: 45px;' id='pos-x' min='-50' max='50' step='0.01'>
+						<label for='pos-y' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Y</label>
+						<input type='number' style='margin: 4px; width: 45px;' id='pos-y' min='-50' max='50' step='0.01'>
+						<label for='pos-z' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Z</label>
+						<input type='number' style='margin: 4px; width: 45px;' id='pos-z' min='-50' max='50' step='0.01'>
+					</div>
 				</div>
 			</span>
 
 			<span class='part'>
-				<select id='selection-list' class='dropdown'></select> 
+				<select id='part-selection-list' style='width: 100%'></select> 
 				<div style='margin-top:3px'>
 					<label for='transparency-value' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Transparency level</label>
-					<input type='number' class='small' id='transparency-value' min='0' max='1' value='0' step='0.01'>
+					<input type='number' style='margin: 3px; width: 45px;' id='transparency-value' min='0' max='1' value='0' step='0.01'>
 				</div>
+				<span class='picker' 
+					acp-color='#EFE9E7'>
+				</span>
 			</span>
-
-			<span class='picker' 
-				acp-color='#EFE9E7'>
-			</span>
-
-			<input type='button' class='take-all' id='save-file' value='Save modified file'>
 		</span>
+
 		<div class='container' id='scene-container'></div>
 		<!-- <canvas class='container' id='scene-container'> -->
 
