@@ -1,37 +1,73 @@
 import { 
     init, 
-    display_kind,
+    display,
     change_color, 
     change_transparency,
     change_scale,
+    change_position,
     getTrancparencyValue,
-    exportGLTF
+    getScaleValue,
+    getPosition,
+    updateListOfInternals,
+    save_scene
 } from './scene.js'
+
 const AColorPicker = require('a-color-picker');
 
 init();
 
 document.getElementById('file-submission').addEventListener('click', function() {
-    var file = document.getElementById('file-selector').files[0];
-    display_kind(URL.createObjectURL(file, { type: 'model/gltf-binary' }));
+    var files = document.getElementById('file-selector').files;
+    for (let i = 0; i < files.length; i++){
+        display(files[i].name, URL.createObjectURL(files[i], { type: 'model/gltf-binary' }));
+        let menu = document.getElementById('model-selection-list');
+        let option = document.createElement('option');
+        option.text = files[i].name;
+        menu.add(option);
+    }
 });
 
-document.getElementById('selection-list').addEventListener('click', function() {
-    document.getElementById('transparency-value').value = getTrancparencyValue(this.value);
-})
+document.getElementById('model-selection-list').addEventListener('click', function() {
+    updateListOfInternals(document.getElementById('part-selection-list'), this.value);
+    document.getElementById('scale-value').value = getScaleValue(document.getElementById('model-selection-list').value);
+    
+    let vector = getPosition(this.value);
+    document.getElementById('pos-x').value = vector.x;
+    document.getElementById('pos-y').value = vector.y;
+    document.getElementById('pos-z').value = vector.z;
+});
+
+document.getElementById('part-selection-list').addEventListener('click', function() {
+    document.getElementById('transparency-value').value = getTrancparencyValue(document.getElementById('model-selection-list').value, this.value);
+});
 
 AColorPicker.from('.picker').on('change', (picker, color) => {
-    change_color(document.getElementById('selection-list').value, color);
+    change_color(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, color);
 });
 
 document.getElementById('transparency-value').addEventListener('change', function() {
-    change_transparency(document.getElementById('selection-list').value, this.value);
+    change_transparency(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
 });
 
 document.getElementById('scale-value').addEventListener('change', function() {
-    change_scale(this.value);
+    change_scale(document.getElementById('model-selection-list').value, this.value);
 });
 
 document.getElementById('save-file').addEventListener('click', function() {
-    exportGLTF('changed_kind');
+    save_scene('scene');
+});
+
+document.getElementById('pos-x').addEventListener('change', function() {
+    change_position(document.getElementById('model-selection-list').value, 
+                {x: this.value, y: document.getElementById('pos-y').value, z: document.getElementById('pos-z').value});
+});
+
+document.getElementById('pos-y').addEventListener('change', function() {
+    change_position(document.getElementById('model-selection-list').value, 
+    {x: document.getElementById('pos-x').value, y: this.value, z: document.getElementById('pos-z').value});
+});
+
+document.getElementById('pos-z').addEventListener('change', function() {
+    change_position(document.getElementById('model-selection-list').value,
+    {x: document.getElementById('pos-x').value, y: document.getElementById('pos-y').value, z: this.value});
 });
