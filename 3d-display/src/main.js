@@ -2,12 +2,16 @@ import {
     init, 
     display,
     change_color, 
-    change_transparency,
+    change_opacity,
+    change_roughness,
+    change_metalness,
     change_scale,
     change_position,
-    getTrancparencyValue,
+    getOpacityValue,
     getScaleValue,
     getPosition,
+    getRoughnessValue,
+    getMetalnessValue,
     updateListOfInternals,
     save_scene
 } from './scene.js'
@@ -30,7 +34,7 @@ document.getElementById('file-submission').addEventListener('click', function() 
 document.getElementById('model-selection-list').addEventListener('click', function() {
     updateListOfInternals(document.getElementById('part-selection-list'), this.value);
     document.getElementById('scale-value').value = getScaleValue(document.getElementById('model-selection-list').value);
-    
+
     let vector = getPosition(this.value);
     document.getElementById('pos-x').value = vector.x;
     document.getElementById('pos-y').value = vector.y;
@@ -38,15 +42,25 @@ document.getElementById('model-selection-list').addEventListener('click', functi
 });
 
 document.getElementById('part-selection-list').addEventListener('click', function() {
-    document.getElementById('transparency-value').value = getTrancparencyValue(document.getElementById('model-selection-list').value, this.value);
+    document.getElementById('opacity-value').value = getOpacityValue(document.getElementById('model-selection-list').value, this.value);
+    document.getElementById('roughness-value').value = getRoughnessValue(document.getElementById('model-selection-list').value, this.value);
+    document.getElementById('metalness-value').value = getMetalnessValue(document.getElementById('model-selection-list').value, this.value);
 });
 
 AColorPicker.from('.picker').on('change', (picker, color) => {
     change_color(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, color);
 });
 
-document.getElementById('transparency-value').addEventListener('change', function() {
-    change_transparency(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
+document.getElementById('opacity-value').addEventListener('change', function() {
+    change_opacity(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
+});
+
+document.getElementById('roughness-value').addEventListener('change', function() {
+    change_roughness(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
+});
+
+document.getElementById('metalness-value').addEventListener('change', function() {
+    change_metalness(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
 });
 
 document.getElementById('scale-value').addEventListener('change', function() {

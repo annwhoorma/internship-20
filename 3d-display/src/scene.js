@@ -141,20 +141,55 @@ export function change_color(model_name, mesh_name, color) {
     
 }
 
-export function change_transparency(model_name, mesh_name, value) {
+export function change_opacity(model_name, mesh_name, value) {
     let model = getModelByName(model_name);
     if (model != undefined) {
         let id = model.structure.get(mesh_name);
         model.model.getObjectById(id).material.transparent = value > 0 ? true : false;
-        model.model.getObjectById(id).material.opacity = 1 - value;   
+        model.model.getObjectById(id).material.opacity = value;   
     }
 }
 
-export function getTrancparencyValue(model_name, mesh_name) {
+export function change_roughness(model_name, mesh_name, value) {
     let model = getModelByName(model_name);
     if (model != undefined) {
         let id = model.structure.get(mesh_name);
-        return (1 - model.model.getObjectById(id).material.opacity).toFixed(2);
+        model.model.getObjectById(id).material.roughness = value;   
+    }
+}
+
+export function change_metalness(model_name, mesh_name, value) {
+    let model = getModelByName(model_name);
+    if (model != undefined) {
+        let id = model.structure.get(mesh_name);
+        model.model.getObjectById(id).material.metalness = value;   
+    }
+}
+
+
+export function getOpacityValue(model_name, mesh_name) {
+    let model = getModelByName(model_name);
+    if (model != undefined) {
+        let id = model.structure.get(mesh_name);
+        return model.model.getObjectById(id).material.opacity.toFixed(2);
+    }
+    return null;
+}
+
+export function getRoughnessValue(model_name, mesh_name) {
+    let model = getModelByName(model_name);
+    if (model != undefined) {
+        let id = model.structure.get(mesh_name);
+        return model.model.getObjectById(id).material.roughness.toFixed(2);
+    }
+    return null;
+}
+
+export function getMetalnessValue(model_name, mesh_name) {
+    let model = getModelByName(model_name);
+    if (model != undefined) {
+        let id = model.structure.get(mesh_name);
+        return model.model.getObjectById(id).material.metalness.toFixed(2);
     }
     return null;
 }
