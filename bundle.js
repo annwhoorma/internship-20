@@ -57491,20 +57491,55 @@
 	    
 	}
 
-	function change_transparency(model_name, mesh_name, value) {
+	function change_opacity(model_name, mesh_name, value) {
 	    let model = getModelByName(model_name);
 	    if (model != undefined) {
 	        let id = model.structure.get(mesh_name);
 	        model.model.getObjectById(id).material.transparent = value > 0 ? true : false;
-	        model.model.getObjectById(id).material.opacity = 1 - value;   
+	        model.model.getObjectById(id).material.opacity = value;   
 	    }
 	}
 
-	function getTrancparencyValue(model_name, mesh_name) {
+	function change_roughness(model_name, mesh_name, value) {
 	    let model = getModelByName(model_name);
 	    if (model != undefined) {
 	        let id = model.structure.get(mesh_name);
-	        return (1 - model.model.getObjectById(id).material.opacity).toFixed(2);
+	        model.model.getObjectById(id).material.roughness = value;   
+	    }
+	}
+
+	function change_metalness(model_name, mesh_name, value) {
+	    let model = getModelByName(model_name);
+	    if (model != undefined) {
+	        let id = model.structure.get(mesh_name);
+	        model.model.getObjectById(id).material.metalness = value;   
+	    }
+	}
+
+
+	function getOpacityValue(model_name, mesh_name) {
+	    let model = getModelByName(model_name);
+	    if (model != undefined) {
+	        let id = model.structure.get(mesh_name);
+	        return model.model.getObjectById(id).material.opacity.toFixed(2);
+	    }
+	    return null;
+	}
+
+	function getRoughnessValue(model_name, mesh_name) {
+	    let model = getModelByName(model_name);
+	    if (model != undefined) {
+	        let id = model.structure.get(mesh_name);
+	        return model.model.getObjectById(id).material.roughness.toFixed(2);
+	    }
+	    return null;
+	}
+
+	function getMetalnessValue(model_name, mesh_name) {
+	    let model = getModelByName(model_name);
+	    if (model != undefined) {
+	        let id = model.structure.get(mesh_name);
+	        return model.model.getObjectById(id).material.metalness.toFixed(2);
 	    }
 	    return null;
 	}
@@ -57577,7 +57612,7 @@
 	document.getElementById('model-selection-list').addEventListener('click', function() {
 	    updateListOfInternals(document.getElementById('part-selection-list'), this.value);
 	    document.getElementById('scale-value').value = getScaleValue(document.getElementById('model-selection-list').value);
-	    
+
 	    let vector = getPosition(this.value);
 	    document.getElementById('pos-x').value = vector.x;
 	    document.getElementById('pos-y').value = vector.y;
@@ -57585,15 +57620,25 @@
 	});
 
 	document.getElementById('part-selection-list').addEventListener('click', function() {
-	    document.getElementById('transparency-value').value = getTrancparencyValue(document.getElementById('model-selection-list').value, this.value);
+	    document.getElementById('opacity-value').value = getOpacityValue(document.getElementById('model-selection-list').value, this.value);
+	    document.getElementById('roughness-value').value = getRoughnessValue(document.getElementById('model-selection-list').value, this.value);
+	    document.getElementById('metalness-value').value = getMetalnessValue(document.getElementById('model-selection-list').value, this.value);
 	});
 
 	acolorpicker.from('.picker').on('change', (picker, color) => {
 	    change_color(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, color);
 	});
 
-	document.getElementById('transparency-value').addEventListener('change', function() {
-	    change_transparency(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
+	document.getElementById('opacity-value').addEventListener('change', function() {
+	    change_opacity(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
+	});
+
+	document.getElementById('roughness-value').addEventListener('change', function() {
+	    change_roughness(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
+	});
+
+	document.getElementById('metalness-value').addEventListener('change', function() {
+	    change_metalness(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
 	});
 
 	document.getElementById('scale-value').addEventListener('change', function() {
