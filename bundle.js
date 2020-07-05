@@ -57358,16 +57358,17 @@
 
 	var scene, camera, renderer, controls, grid;
 	var lights = new Array(8);
-	var models = [];
+	var modelDs = [];
+	var namesControl = new Map();
 
-	function init() {
+	function init(container_id) {
 	    // create the gray scene
 	    scene = new Scene();
 	    scene.background = new Color('gray');
 
 	    // create the camera
 	    camera = new PerspectiveCamera( 60, 2, 0.1, 1000 );
-	    camera.position.set(2, 4, 5);
+	    camera.position.set(0.4, 0.2, 0.2);
 	    
 	    for (let i = 0; i < 8; i++){
 	        lights[i] = new DirectionalLight(0xffffff, 0.9);
@@ -57388,7 +57389,7 @@
 	    renderer.physicallyCorrectLights = true;
 	    renderer.outputEncoding = sRGBEncoding;
 
-	    let container = document.getElementById('scene-container');
+	    let container = document.getElementById(container_id);
 	    renderer.setSize(container.offsetWidth, container.offsetHeight);
 	    container.appendChild(renderer.domElement);
 
@@ -57408,215 +57409,310 @@
 	}
 
 	function display(name, data) {
+	    function setUniqueName() {
+	        if (namesControl.get(name) == undefined) {
+	            namesControl.set(name, 1);
+	            return name;
+	        }
+	        else {
+	            let counter = namesControl.get(name)+1;
+	            namesControl.set(name, counter);
+	            return "(" + counter.toString() + ") " + name;
+	        }
+	    }
+
 	    const dracoLoader = new DRACOLoader();
 
-	    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+	    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/'); //should be removed 
 	    dracoLoader.setDecoderConfig({ type: 'js' });
 	    
 	    const gltfloader = new GLTFLoader();
 	    gltfloader.setDRACOLoader(dracoLoader);
 
+	    name = setUniqueName();
+
 	    gltfloader.load(data, function (gltf) {
 	        let model = gltf.scene;
+	        let bfsResult = bfs(model);
+	        modelDs.push(new ModelDescription(model, name, model.scale.clone(), bfsResult));
 	        scene.add(model);
-	        models.push(new Model(model, name, model.scale.clone(), bfs(model)));
 	    });
+	    return name;
 	}
 
 	function bfs(model) {
 	    let queue = new Queue();
-	    let list = [];
-	    parent = new Node$1(model, null,  0);
-	    list.push(parent);
+	    let depth_counter = 0;
+	    let parent = new Node$1(model, null, depth_counter);
+
 	    queue.enqueue(parent);
 	    
 	    while (queue.isEmpty() == false) {
 	        let c = queue.dequeue();
-	        if (c.obj.children.length > 0) {
-	            c.obj.children.forEach(child => {
-	                let node_child = new Node$1(child, c.obj, 0);
-	                c.children.push(node_child);
+	        if (c.model.children.length == 0) {
+	            depth_counter -= 1;
+	        }
+	        else if (c.model.children.length > 0) {
+	            depth_counter += 1;
+	            c.model.children.forEach(child => {
+	                let node_child = new Node$1(child, c.model, depth_counter);
+	                c.children.push(node_child); // KEEP IT HERE PLEASE
 	                queue.enqueue(node_child);
-	                list.push(node_child);
 	            });
 	        }
 	    }
-	    return list;
+	    return parent;
 	}
 
-	function getModelByName(name) {
+
+	function getModelDByName(name) {
 	    let res;
-	    models.forEach(m => {
+	    modelDs.forEach(m => {
 	        if (m.name == name) res = m;
 	    });
 	    return res;
 	}
 
-	function updateListOfInternals(menu, model_name) {
+	function updateListOfInternals(menu, modelName) {
 	    menu.innerHTML = "";
-	    let tree = getModelByName(model_name).tree;
-	    tree.forEach(t => {
+	    let structure = getModelDByName(modelName).tree.getChildrenIDs();
+	    structure.forEach(record => {
+	        name = getModelDByName(modelName).model.getObjectById(record).name;
 	        let option = document.createElement('option');
-	        option.text = t.obj.name + ' (' + t.obj.type + ')', t.obj.name;
+	        option.text = name;
 	        menu.add(option);
 	    });
 	}
 
-	function change_scale(model_name, value) {
-	    let model;
-	    model = getModelByName(model_name);
-	    if (model != undefined) {
-	        let init_scale = model.init_scale;
-	        let x = init_scale.x*parseFloat(value);
-	        let y = init_scale.y*parseFloat(value);
-	        let z = init_scale.z*parseFloat(value);
-	        model.model.scale.set(x, y, z);
-	        model.scale = value;
+	function setScale(modelName, value, {sx, sy, sz}) {
+	    let modelD = getModelDByName(modelName);
+	    if (modelD != undefined) {
+	        let initScale = modelD.initScale;
+	        value = parseFloat(value);
+	        let x = initScale.x * parseFloat(sx) * value / modelD.curScale;
+	        let y = initScale.y * parseFloat(sy) * value / modelD.curScale;
+	        let z = initScale.z * parseFloat(sz) * value / modelD.curScale;
+	        modelD.model.scale.set(x, y, z);
+	        modelD.curScale = value;
 	    }
 	}
 
-	function change_position(model_name, {x, y, z}) {
-	    let model = getModelByName(model_name);
-	    if (model != undefined) {
-	        let init_scale = model.init_scale;
-	        model.model.position.set(init_scale.x*parseFloat(x), init_scale.y*parseFloat(y), init_scale.z*parseFloat(z));
+	function getSize(modelName) {
+	    let modelD = getModelDByName(modelName);
+	    if (modelD != undefined) {
+	        return modelD.model.scale;
 	    }
 	}
 
-	function change_color(model_name, mesh_name, color) {
-	    let model = getModelByName(model_name);
-	    if (model != undefined) {
-	        model.model.getObjectById(model.structure.get(mesh_name)).material.color.set(color);
-	    }
-	    
-	}
-
-	function change_opacity(model_name, mesh_name, value) {
-	    let model = getModelByName(model_name);
-	    if (model != undefined) {
-	        let id = model.structure.get(mesh_name);
-	        model.model.getObjectById(id).material.transparent = value > 0 ? true : false;
-	        model.model.getObjectById(id).material.opacity = value;   
+	function setPosition(modelName, {x, y, z}) {
+	    let modelD = getModelDByName(modelName);
+	    if (modelD != undefined) {
+	        let initScale = modelD.initScale;
+	        modelD.model.position.set(initScale.x*parseFloat(x), initScale.y*parseFloat(y), initScale.z*parseFloat(z));
 	    }
 	}
 
-	function change_roughness(model_name, mesh_name, value) {
-	    let model = getModelByName(model_name);
-	    if (model != undefined) {
-	        let id = model.structure.get(mesh_name);
-	        model.model.getObjectById(id).material.roughness = value;   
+	// SETTERS FOR MATERIAL
+
+	function setMaterialProperty(modelsNames, internalsNames, value, callback) {
+	    for (let i = 0; i < modelsNames.length; i++) {
+	        let modelD = getModelDByName(modelsNames[i]);
+
+	        if (modelD != undefined) {
+	            for (let j = 0; j < internalsNames[i].length; j++) {
+	                let curNode = modelD.tree.getNodeByName(internalsNames[i][j]);
+	                if (curNode != null && !(curNode.model instanceof Mesh)) {
+	                    let childrenIDs = curNode.getChildrenIDs();
+	                    childrenIDs.forEach(childID => {
+	                        if (modelD.model.getObjectById(childID) instanceof Mesh) {
+	                            callback(modelD, childID, value);
+	                        }
+	                    });
+	                }
+	                else if (curNode != null && curNode.model instanceof Mesh) {
+	                    callback(modelD, curNode.model.id, value);
+	                }
+	            }
+	        }
 	    }
 	}
 
-	function change_metalness(model_name, mesh_name, value) {
-	    let model = getModelByName(model_name);
-	    if (model != undefined) {
-	        let id = model.structure.get(mesh_name);
-	        model.model.getObjectById(id).material.metalness = value;   
-	    }
+	function setColor(modelD, meshID, color) {
+	    modelD.model.getObjectById(meshID).material.color.set(color);
 	}
 
+	function setOpacity(modelD, meshID, value) {
+	    modelD.model.getObjectById(meshID).material.transparent = value > 0 ? true : false;
+	    modelD.model.getObjectById(meshID).material.opacity = value;   
+	}
 
-	function getOpacityValue(model_name, mesh_name) {
-	    let model = getModelByName(model_name);
-	    if (model != undefined) {
-	        let id = model.structure.get(mesh_name);
-	        return model.model.getObjectById(id).material.opacity.toFixed(2);
+	function setRoughness(modelD, meshID, value) {
+	    modelD.model.getObjectById(meshID).material.roughness = value;   
+	}
+
+	function setMetalness(modelD, meshID, value) {
+	    modelD.model.getObjectById(meshID).material.metalness = value;   
+	}
+
+	// GETTERS FOR MATERIAL
+
+	function getOpacityValue(modelName, meshName) {
+	    let modelD = getModelDByName(modelName);
+	    if (modelD != undefined) {
+	        let mesh = modelD.model.getObjectByName(meshName);
+	        if (mesh instanceof Mesh)
+	            return mesh.material.opacity.toFixed(2);
 	    }
 	    return null;
 	}
 
-	function getRoughnessValue(model_name, mesh_name) {
-	    let model = getModelByName(model_name);
-	    if (model != undefined) {
-	        let id = model.structure.get(mesh_name);
-	        return model.model.getObjectById(id).material.roughness.toFixed(2);
+	function getRoughnessValue(modelName, meshName) {
+	    let modelD = getModelDByName(modelName);
+	    if (modelD != undefined) {
+	        let mesh = modelD.model.getObjectByName(meshName);
+	        if (mesh instanceof Mesh)
+	            return mesh.material.roughness.toFixed(2);
 	    }
 	    return null;
 	}
 
-	function getMetalnessValue(model_name, mesh_name) {
-	    let model = getModelByName(model_name);
-	    if (model != undefined) {
-	        let id = model.structure.get(mesh_name);
-	        return model.model.getObjectById(id).material.metalness.toFixed(2);
+	function getMetalnessValue(modelName, meshName) {
+	    let modelD = getModelDByName(modelName);
+	    if (modelD != undefined) {
+	        let mesh = modelD.model.getObjectByName(meshName);
+	        if (mesh instanceof Mesh)
+	            return mesh.material.metalness.toFixed(2);
 	    }
 	    return null;
 	}
 
-	function getScaleValue(model_name){
-	    let model = getModelByName(model_name);
-	    return (model != undefined) ? model.scale : null;
+	// GETTERS FOR TRNSFORMATION
+
+	function getScaleValue(modelName){
+	    let modelD = getModelDByName(modelName);
+	    return (modelD != undefined) ? modelD.curScale : null;
 	}
 
-	function getPosition(model_name){
-	    let model = getModelByName(model_name);
-	    if (model != undefined) {
-	        let pos = model.model.position;
+	function getPosition(modelName){
+	    let modelD = getModelDByName(modelName);
+	    if (modelD != undefined) {
+	        let pos = modelD.model.position;
 	        let vector = new Vector3(pos.x.toFixed(2), pos.y.toFixed(2), pos.z.toFixed(2));
 	        return vector;
 	    }
 	    return null;
 	}
 
-	function save_scene() {
-	    let new_scene = new Group();
-	    models.forEach(m => {
-	        new_scene.children.push(m.model);
-	        new_scene.children[new_scene.children.length-1].name = name.slice(0, m.name.length - 4);
+	function saveScene(fileName) {
+	    let newScene = new Group();
+	    modelDs.forEach(m => {
+	        newScene.children.push(m.model); // REMOVE. check Group.add()
+	        newScene.children[newScene.children.length-1].name = name.slice(0, m.name.length - 4);
 	    });
-	    exportGLTF('scene', new_scene.children); 
+	    exportGLTF(fileName, newScene.children);
 	}
 
-	class Model {
-	    constructor(model, name, init_scale, tree) {
+	class ModelDescription {
+	    constructor(model, name, initScale, tree) {
 	        this.model = model;
-	        this.name = name;
-	        this.init_scale = init_scale;
+	        this.name = name; // !!! REMOVE
+
+	        this.initScale = initScale;
+	        this.curScale = 1;
+	        // this.size = this.initScale;
+
+	        this.initPosition = null;
+
 	        this.tree = tree;
-	        this.structure = this.createDictionary(tree); // mapping: name (type) |-> id
-	        this.scale = 1;
+	        // this.createDictionar+zy(tree); // mapping: name (type) |-> id
 	    }
 	    
-	    createDictionary(list) {
-	        let structure_dict = new Map();
-	        list.forEach(l =>{
-	            structure_dict.set(l.obj.name + ' (' + l.obj.type + ')', l.obj.id);
+	    createDictionary(tree) {
+	        this.structureDict = new Map();
+	        tree.forEach(node =>{
+	            this.structureDict.set(node.model.id, node.model.name); // ??????????????????????// make ID a key
 	        });
-	        return structure_dict;
 	    }
 	}
 
 	class Node$1 {
-	    constructor(obj, parent, depth) {
-	        this.obj = obj;
-	        this.parent = parent;
+	    constructor(model, parent, depth) {
+	        this.model = model; // contains .type, .name, .id   // !!! RENAME TO OBJ idk
+	        this.parent = parent; // REMOVE ???
 	        this.depth = depth;
-	        this.children = [];
+	        this.children = []; // remember that you need it to keep depth level of the tree
+	    }
+
+	    getNodeByName(name) {
+	        let queue = new Queue();
+	        queue.enqueue(this);
+	        let ret = null;
+	    
+	        while (queue.isEmpty() == false) {
+	            let node = queue.dequeue();
+	            if (node.model.name == name) {
+	                return node;
+	            }
+	            if (node.children.length > 0) {
+	                node.children.forEach(node_child => {
+	                    if (node_child.model.name == name) {
+	                        ret = node_child;
+	                        return;
+	                    }
+	                    queue.enqueue(node_child);
+	                });
+	                if (ret != null) 
+	                    return ret;
+	            }
+	        }
+	        return null;
+	    }
+
+	    getChildrenIDs() {
+	        let queue = new Queue();
+	        queue.enqueue(this);
+	        let list = [];
+	        list.push(this.model.id);
+	    
+	        while (queue.isEmpty() == false) {
+	            let node = queue.dequeue();
+	            if (node.children.length > 0) {
+	                node.children.forEach(node_child => {
+	                    list.push(node_child.model.id);
+	                    queue.enqueue(node_child);
+	                });
+	            }
+	        }
+	        return list;
 	    }
 	}
 
-	init();
+	init('scene-container');
 
 	document.getElementById('file-submission').addEventListener('click', function() {
 	    var files = document.getElementById('file-selector').files;
 	    for (let i = 0; i < files.length; i++){
-	        display(files[i].name, URL.createObjectURL(files[i], { type: 'model/gltf-binary' }));
+	        name = display(files[i].name, URL.createObjectURL(files[i], { type: 'model/gltf-binary' }));
 	        let menu = document.getElementById('model-selection-list');
 	        let option = document.createElement('option');
-	        option.text = files[i].name;
+	        option.text = name;
 	        menu.add(option);
 	    }
 	});
 
 	document.getElementById('model-selection-list').addEventListener('click', function() {
 	    updateListOfInternals(document.getElementById('part-selection-list'), this.value);
-	    document.getElementById('scale-value').value = getScaleValue(document.getElementById('model-selection-list').value);
+	    document.getElementById('scale-value').value = getScaleValue(this.value);
 
 	    let vector = getPosition(this.value);
 	    document.getElementById('pos-x').value = vector.x;
 	    document.getElementById('pos-y').value = vector.y;
 	    document.getElementById('pos-z').value = vector.z;
+
+	    vector = getSize(this.value);
+	    document.getElementById('size-x').value = vector.x;
+	    document.getElementById('size-y').value = vector.y;
+	    document.getElementById('size-z').value = vector.z;
 	});
 
 	document.getElementById('part-selection-list').addEventListener('click', function() {
@@ -57626,42 +57722,62 @@
 	});
 
 	acolorpicker.from('.picker').on('change', (picker, color) => {
-	    change_color(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, color);
+	    setMaterialProperty([document.getElementById('model-selection-list').value], [[document.getElementById('part-selection-list').value]], color, setColor);
 	});
 
-	document.getElementById('opacity-value').addEventListener('change', function() {
-	    change_opacity(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
+	document.getElementById('opacity-value').addEventListener('input', function() {
+	    setMaterialProperty([document.getElementById('model-selection-list').value], [[document.getElementById('part-selection-list').value]], this.value, setOpacity);
 	});
 
-	document.getElementById('roughness-value').addEventListener('change', function() {
-	    change_roughness(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
+	document.getElementById('roughness-value').addEventListener('input', function() {
+	    setMaterialProperty([document.getElementById('model-selection-list').value], [[document.getElementById('part-selection-list').value]], this.value, setRoughness);
 	});
 
-	document.getElementById('metalness-value').addEventListener('change', function() {
-	    change_metalness(document.getElementById('model-selection-list').value, document.getElementById('part-selection-list').value, this.value);
+	document.getElementById('metalness-value').addEventListener('input', function() {
+	    setMaterialProperty([document.getElementById('model-selection-list').value], [[document.getElementById('part-selection-list').value]], this.value, setMetalness);
 	});
 
-	document.getElementById('scale-value').addEventListener('change', function() {
-	    change_scale(document.getElementById('model-selection-list').value, this.value);
+	document.getElementById('scale-value').addEventListener('input', function() {
+	    setScale(document.getElementById('model-selection-list').value, this.value,
+	    {sx: document.getElementById('size-x').value, sy: document.getElementById('size-y').value, sz: document.getElementById('size-z').value});
+
+	    let vector = getSize(document.getElementById('model-selection-list').value);
+	    document.getElementById('size-x').value = vector.x;
+	    document.getElementById('size-y').value = vector.y;
+	    document.getElementById('size-z').value = vector.z;
+	    
 	});
 
 	document.getElementById('save-file').addEventListener('click', function() {
-	    save_scene();
+	    saveScene('scene');
 	});
 
-	document.getElementById('pos-x').addEventListener('change', function() {
-	    change_position(document.getElementById('model-selection-list').value, 
+	// POSITION
+	document.getElementById('pos-x').addEventListener('input', function() {
+	    setPosition(document.getElementById('model-selection-list').value, 
 	                {x: this.value, y: document.getElementById('pos-y').value, z: document.getElementById('pos-z').value});
 	});
-
-	document.getElementById('pos-y').addEventListener('change', function() {
-	    change_position(document.getElementById('model-selection-list').value, 
+	document.getElementById('pos-y').addEventListener('input', function() {
+	    setPosition(document.getElementById('model-selection-list').value, 
 	    {x: document.getElementById('pos-x').value, y: this.value, z: document.getElementById('pos-z').value});
 	});
-
-	document.getElementById('pos-z').addEventListener('change', function() {
-	    change_position(document.getElementById('model-selection-list').value,
+	document.getElementById('pos-z').addEventListener('input', function() {
+	    setPosition(document.getElementById('model-selection-list').value,
 	    {x: document.getElementById('pos-x').value, y: document.getElementById('pos-y').value, z: this.value});
+	});
+
+	// SIZE
+	document.getElementById('size-x').addEventListener('input', function() {
+	    setScale(document.getElementById('model-selection-list').value, document.getElementById('scale-value').value,
+	    {sx: this.value, sy: document.getElementById('size-y').value, sz: document.getElementById('size-z').value});
+	});
+	document.getElementById('size-y').addEventListener('input', function() {
+	    setScale(document.getElementById('model-selection-list').value, document.getElementById('scale-value').value,
+	    {sx: document.getElementById('size-x').value, sy: this.value, sz: document.getElementById('size-z').value});
+	});
+	document.getElementById('size-z').addEventListener('input', function() {
+	    setScale(document.getElementById('model-selection-list').value, document.getElementById('scale-value').value,
+	    {sx: document.getElementById('size-x').value, sy: document.getElementById('size-y').value, sz: this.value});
 	});
 
 }());
