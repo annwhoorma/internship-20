@@ -57554,6 +57554,24 @@
 	    modelD.model.getObjectById(meshID).material.metalness = value;   
 	}
 
+	function setMetalnessMap(modelD, meshID, data) {
+	    let textureLoader = new TextureLoader();
+	    textureLoader.load(data, (texture) => {
+	        texture.image.isMap = true;
+	        modelD.model.getObjectById(meshID).material.needsUpdate = true;
+	        modelD.model.getObjectById(meshID).material.metalnessMap = texture;
+	    });
+	}
+
+	function setRoughnessMap(modelD, meshID, data) {
+	    let textureLoader = new TextureLoader();
+	    textureLoader.load(data, (texture) => {
+	        texture.image.isMap = true;
+	        modelD.model.getObjectById(meshID).material.needsUpdate = true;
+	        modelD.model.getObjectById(meshID).material.roughnessMap = texture;
+	    });
+	}
+
 	// GETTERS FOR MATERIAL
 
 	function getOpacityValue(modelName, meshName) {
@@ -57689,6 +57707,7 @@
 
 	init('scene-container');
 
+
 	document.getElementById('file-submission').addEventListener('click', function() {
 	    var files = document.getElementById('file-selector').files;
 	    for (let i = 0; i < files.length; i++){
@@ -57752,6 +57771,8 @@
 	    saveScene('scene');
 	});
 
+
+
 	// POSITION
 	document.getElementById('pos-x').addEventListener('input', function() {
 	    setPosition(document.getElementById('model-selection-list').value, 
@@ -57766,7 +57787,10 @@
 	    {x: document.getElementById('pos-x').value, y: document.getElementById('pos-y').value, z: this.value});
 	});
 
+
+
 	// SIZE
+
 	document.getElementById('size-x').addEventListener('input', function() {
 	    setScale(document.getElementById('model-selection-list').value, document.getElementById('scale-value').value,
 	    {sx: this.value, sy: document.getElementById('size-y').value, sz: document.getElementById('size-z').value});
@@ -57778,6 +57802,28 @@
 	document.getElementById('size-z').addEventListener('input', function() {
 	    setScale(document.getElementById('model-selection-list').value, document.getElementById('scale-value').value,
 	    {sx: document.getElementById('size-x').value, sy: document.getElementById('size-y').value, sz: this.value});
+	});
+
+
+
+	// METALNESS MAP
+
+	document.getElementById('file-submission-metalness').addEventListener('click', function() {
+	    var file = document.getElementById('file-selector').files[0];
+	    setMaterialProperty([document.getElementById('model-selection-list').value], 
+	        [[document.getElementById('part-selection-list').value]], 
+	        URL.createObjectURL(file, { type: 'image/jpeg' }), 
+	        setMetalnessMap);
+	});
+
+	// ROUGHNESS MAP
+
+	document.getElementById('file-submission-roughness').addEventListener('click', function() {
+	    var file = document.getElementById('file-selector').files[0];
+	    setMaterialProperty([document.getElementById('model-selection-list').value], 
+	        [[document.getElementById('part-selection-list').value]], 
+	        URL.createObjectURL(file, { type: 'image/jpeg' }), 
+	        setRoughnessMap);
 	});
 
 }());

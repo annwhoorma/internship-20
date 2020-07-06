@@ -31,8 +31,13 @@
 	<body>
 		<span class='menuleftcontent'>
 			<span class='part'>
-				<input type='file' id='file-selector' accept='.glb' change='onChange' multiple>
-				<input type='button' style='width: 100%; margin-top: 4px' id='file-submission' value='Submit Files'>
+				<input type='file' id='file-selector' accept='.glb, image/jpeg' change='onChange' multiple>
+				<input type='button' style='width: 100%; margin-top: 4px' id='file-submission' value='Submit Files for Display'>
+
+				<!-- <input type='button' style='width: 100%; margin-top: 4px' id='file-submission-opacity' value='Texture (opacity)'> -->
+				<input type='button' style='width: 100%; margin-top: 4px' id='file-submission-roughness' value='Texture (roughness)'> 
+				<input type='button' style='width: 100%; margin-top: 4px' id='file-submission-metalness' value='Texture (metalness)'>
+				
 				<input type='button' style='width: 100%; margin-top: 4px' id='save-file' value='Save the Scene'>
 			</span>
 
