@@ -216,6 +216,24 @@ export function setMetalness(modelD, meshID, value) {
     modelD.model.getObjectById(meshID).material.metalness = value;   
 }
 
+export function setMetalnessMap(modelD, meshID, data) {
+    let textureLoader = new THREE.TextureLoader();
+    textureLoader.load(data, (texture) => {
+        texture.image.isMap = true;
+        modelD.model.getObjectById(meshID).material.needsUpdate = true;
+        modelD.model.getObjectById(meshID).material.metalnessMap = texture;
+    });
+}
+
+export function setRoughnessMap(modelD, meshID, data) {
+    let textureLoader = new THREE.TextureLoader();
+    textureLoader.load(data, (texture) => {
+        texture.image.isMap = true;
+        modelD.model.getObjectById(meshID).material.needsUpdate = true;
+        modelD.model.getObjectById(meshID).material.roughnessMap = texture;
+    });
+}
+
 // GETTERS FOR MATERIAL
 
 export function getOpacityValue(modelName, meshName) {
