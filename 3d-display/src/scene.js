@@ -6,12 +6,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { Queue } from './Queue';
 import { exportGLTF } from './exportGLTF';
 
-var scene, camera, renderer, controls, grid;
+var scene, camera, renderer, grid;
 var lights = new Array(8);
 var modelDs = [];
 var namesControl = new Map();
+var xyz = [];
 
-export function init(container_id) {
+export function init(container) {
     // create the gray scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color('gray');
@@ -39,17 +40,22 @@ export function init(container_id) {
     renderer.physicallyCorrectLights = true;
     renderer.outputEncoding = THREE.sRGBEncoding;
 
-    let container = document.getElementById(container_id);
     renderer.setSize(container.offsetWidth, container.offsetHeight);
     container.appendChild(renderer.domElement);
 
-    controls = new OrbitControls(camera, renderer.domElement);
+    new OrbitControls(camera, renderer.domElement);
 
     grid = new THREE.GridHelper( 100, 40, 0x000000, 0x000000 );
     grid.material.opacity = 0.1;
     grid.material.depthWrite = false;
     grid.material.transparent = true;
     scene.add(grid);
+
+    // xyz = new XYZ(new THREE.Vector3(0, 0, 0), 1, {});
+    // xyz.axes.forEach(axis => {
+    //     scene.add(axis);
+    // });
+
     animate();
 }
 
@@ -67,13 +73,13 @@ export function display(name, data) {
         else {
             let counter = namesControl.get(name)+1;
             namesControl.set(name, counter);
-            return "(" + counter.toString() + ") " + name;
+            return `(${counter-1}) ${name}`
         }
     }
 
     const dracoLoader = new DRACOLoader();
 
-    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/'); //should be removed 
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
     dracoLoader.setDecoderConfig({ type: 'js' });
     
     const gltfloader = new GLTFLoader();
@@ -83,14 +89,19 @@ export function display(name, data) {
 
     gltfloader.load(data, function (gltf) {
         let model = gltf.scene;
-        let bfsResult = bfs(model);
-        modelDs.push(new ModelDescription(model, name, model.scale.clone(), bfsResult));
-        scene.add(model);
+        let group = new THREE.Group();
+        let xyz = new XYZ(model.position, 0.5, {});
+        group.add(model); 
+        xyz.axes.forEach(axis => {
+            group.add(axis);
+        });
+        modelDs.push(new ModelDescription(model, name, model.scale.clone(), modelStructure(model), xyz, group));
+        scene.add(group);
     });
     return name;
 }
 
-function bfs(model) {
+function modelStructure(model) {
     let queue = new Queue();
     let depth_counter = 0;
     let parent = new Node(model, null, depth_counter);
@@ -106,7 +117,7 @@ function bfs(model) {
             depth_counter += 1;
             c.model.children.forEach(child => {
                 let node_child = new Node(child, c.model, depth_counter);
-                c.children.push(node_child); // KEEP IT HERE PLEASE
+                c.children.push(node_child);
                 queue.enqueue(node_child);
             });
         }
@@ -134,16 +145,44 @@ export function updateListOfInternals(menu, modelName) {
     });
 }
 
+export function removeModel(modelName) {
+    let modelD = getModelDByName(modelName);
+    if (modelD != undefined) {
+        let childrenIDs = modelD.tree.getChildrenIDs();
+        childrenIDs.forEach(id => {
+            let mesh = modelD.model.getObjectById(id);
+            mesh.material?.dispose();
+            mesh.geometry?.dispose();
+            mesh.texture?.dispose();
+        });
+        scene.remove(modelD.model);
+        for (let i = 0; i < modelDs.length; i++){
+            if (modelDs[i] == modelD)
+                modelDs.splice(i, 1);
+        }
+    }
+}
+
+
+export function highlightChosenObject(modelName, internalName) {
+    let modelD = getModelDByName(modelName);
+    let internalObject = modelD.model.getObjectByName(internalName);
+    let modelPos = modelD.model.position;
+    let meshPos = internalObject.position;
+    let position = new THREE.Vector3(modelPos.x-meshPos.x, modelPos.y-meshPos.y, modelPos.z-meshPos.z);
+    xyz.shift(position, 0.4);
+}
+
 // SETTERS FOR TRANSFORMATION
 
 export function setTransformationProperty(modelsNames, value, callback) {
-    for (let i = 0; i < modelsNames.length; i++) {
-        let modelD = getModelDByName(modelsNames[i]);
+    modelsNames.forEach(mName => {
+        let modelD = getModelDByName(mName);
 
         if (modelD != undefined) {
             callback(modelD, value);
         }
-    }
+    });
 }
 
 export function setScale(modelName, value, {sx, sy, sz}) {
@@ -170,7 +209,7 @@ export function setPosition(modelName, {x, y, z}) {
     let modelD = getModelDByName(modelName);
     if (modelD != undefined) {
         let initScale = modelD.initScale;
-        modelD.model.position.set(initScale.x*parseFloat(x), initScale.y*parseFloat(y), initScale.z*parseFloat(z));
+        modelD.group.position.set(initScale.x*parseFloat(x), initScale.y*parseFloat(y), initScale.z*parseFloat(z));
     }
 }
 
@@ -200,7 +239,9 @@ export function setMaterialProperty(modelsNames, internalsNames, value, callback
 }
 
 export function setColor(modelD, meshID, color) {
+    console.log(modelD, meshID, color);
     modelD.model.getObjectById(meshID).material.color.set(color);
+    console.log(modelD.model.getObjectById(meshID).material.color);
 }
 
 export function setOpacity(modelD, meshID, value) {
@@ -268,7 +309,7 @@ export function getMetalnessValue(modelName, meshName) {
 
 // GETTERS FOR TRNSFORMATION
 
-export function getScaleValue(modelName){
+export function getScale(modelName){
     let modelD = getModelDByName(modelName);
     return (modelD != undefined) ? modelD.curScale : null;
 }
@@ -286,41 +327,91 @@ export function getPosition(modelName){
 export function saveScene(fileName) {
     let newScene = new THREE.Group();
     modelDs.forEach(m => {
-        newScene.children.push(m.model); // REMOVE. check Group.add()
+        newScene.children.push(m.model);
+        let name = m.name;
         newScene.children[newScene.children.length-1].name = name.slice(0, m.name.length - 4);
     });
     exportGLTF(fileName, newScene.children);
 }
 
-export class ModelDescription {
-    constructor(model, name, initScale, tree) {
+
+class XYZ {
+    constructor(origin, length, {lineWidth, xColor, yColor, zColor}) {
+        this.axes = [];
+        lineWidth = lineWidth || 1;
+        xColor = xColor || 'red'; yColor = yColor || 'green'; zColor = zColor || 'blue';
+
+        this.xend = new THREE.Vector3(length+origin.x, origin.y, origin.z);
+        this.yend = new THREE.Vector3(origin.x, origin.y+length, origin.z);
+        this.zend = new THREE.Vector3(origin.x, origin.y, origin.z+length);
+
+        this.xAxis = this.createLine(origin, this.xend, xColor, lineWidth);
+        this.yAxis = this.createLine(origin, this.yend, yColor, lineWidth);
+        this.zAxis = this.createLine(origin, this.zend, zColor, lineWidth);
+
+        this.axes.push(this.xAxis, this.yAxis, this.zAxis);
+        this.hide();
+    }
+
+    createLine(start, end, color, lineWidth) {
+        let geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+        let material = new THREE.LineBasicMaterial({color: color, linewidth: lineWidth});
+        material.transparent = true;
+        return new THREE.Line(geometry, material);
+    }
+
+    updateGeometry(axis, start, end){
+        axis.geometry?.dispose();
+        axis.geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+    }
+
+    hide() {
+        this.axes.forEach(axis => {
+            axis.material.opacity = 0;
+        });
+    }
+
+    show(){
+        this.axes.forEach(axis => {
+            axis.material.opacity = 100;
+        });
+    }
+
+    shift(origin, length) {
+        this.xend.x = length+origin.x; this.xend.y = origin.y; this.xend.z = origin.z;
+        this.yend.x = origin.x, this.yend.y = origin.y+length; this.yend.z = origin.z;
+        this.zend.x = origin.x, this.zend.y = origin.y, this.zend.z = origin.z+length;
+
+        this.updateGeometry(this.xAxis, origin, this.xend);
+        this.updateGeometry(this.yAxis, origin, this.yend);
+        this.updateGeometry(this.zAxis, origin, this.zend);
+
+        this.show();
+    }
+}
+
+class ModelDescription {
+    constructor(model, name, initScale, tree, xyz, group) {
         this.model = model;
-        this.name = name; // !!! REMOVE
+        this.name = name;
+        this.xyz = xyz;
+        this.group = group;
 
         this.initScale = initScale;
         this.curScale = 1;
-        // this.size = this.initScale;
 
         this.initPosition = null;
 
         this.tree = tree;
-        // this.createDictionar+zy(tree); // mapping: name (type) |-> id
-    }
-    
-    createDictionary(tree) {
-        this.structureDict = new Map();
-        tree.forEach(node =>{
-            this.structureDict.set(node.model.id, node.model.name); // ??????????????????????// make ID a key
-        });
     }
 }
 
 class Node {
     constructor(model, parent, depth) {
-        this.model = model; // contains .type, .name, .id   // !!! RENAME TO OBJ idk
-        this.parent = parent; // REMOVE ???
+        this.model = model;
+        this.parent = parent;
         this.depth = depth;
-        this.children = []; // remember that you need it to keep depth level of the tree
+        this.children = [];
     }
 
     getNodeByName(name) {

@@ -1,6 +1,7 @@
 import { 
     init, 
     display,
+    highlightChosenObject,
     setMaterialProperty,
     setColor, 
     setOpacity,
@@ -8,22 +9,22 @@ import {
     setMetalness,
     setScale,
     setPosition,
-    // setOpacityMap,
     setMetalnessMap,
     setRoughnessMap, 
     getOpacityValue,
-    getScaleValue,
+    getScale,
     getPosition,
     getSize,
     getRoughnessValue,
     getMetalnessValue,
     updateListOfInternals,
-    saveScene
+    saveScene, 
+    removeModel
 } from './scene.js'
 
 const AColorPicker = require('a-color-picker');
 
-init('scene-container');
+init(document.getElementById('scene-container'));
 
 
 document.getElementById('file-submission').addEventListener('click', function() {
@@ -39,7 +40,7 @@ document.getElementById('file-submission').addEventListener('click', function() 
 
 document.getElementById('model-selection-list').addEventListener('click', function() {
     updateListOfInternals(document.getElementById('part-selection-list'), this.value);
-    document.getElementById('scale-value').value = getScaleValue(this.value);
+    document.getElementById('scale-value').value = getScale(this.value);
 
     let vector = getPosition(this.value);
     document.getElementById('pos-x').value = vector.x;
@@ -53,6 +54,7 @@ document.getElementById('model-selection-list').addEventListener('click', functi
 });
 
 document.getElementById('part-selection-list').addEventListener('click', function() {
+    highlightChosenObject(document.getElementById('model-selection-list').value, this.value);
     document.getElementById('opacity-value').value = getOpacityValue(document.getElementById('model-selection-list').value, this.value);
     document.getElementById('roughness-value').value = getRoughnessValue(document.getElementById('model-selection-list').value, this.value);
     document.getElementById('metalness-value').value = getMetalnessValue(document.getElementById('model-selection-list').value, this.value);
@@ -87,6 +89,7 @@ document.getElementById('scale-value').addEventListener('input', function() {
 
 document.getElementById('save-file').addEventListener('click', function() {
     saveScene('scene');
+    // removeModel(document.getElementById('model-selection-list').value);
 });
 
 
