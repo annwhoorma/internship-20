@@ -33,56 +33,9 @@
 			<span class='part'>
 				<input type='file' id='file-selector' accept='.glb, image/jpeg' change='onChange' multiple>
 				<input type='button' style='width: 100%; margin-top: 4px' id='file-submission' value='Submit Files for Display'>
-
-				<!-- <input type='button' style='width: 100%; margin-top: 4px' id='file-submission-opacity' value='Texture (opacity)'> -->
-				<input type='button' style='width: 100%; margin-top: 4px' id='file-submission-roughness' value='Texture (roughness)'> 
-				<input type='button' style='width: 100%; margin-top: 4px' id='file-submission-metalness' value='Texture (metalness)'>
-				
-				<input type='button' style='width: 100%; margin-top: 4px' id='save-file' value='Save the Scene'>
 			</span>
 
 			<span class='part'>
-				<div>
-					<select id='model-selection-list' style='width: 100%' style='margin-bottom: 3px'></select> 
-					<label for='scale-value' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Scaling factor</label>
-					<input type='number' style='margin: 3px; width: 45px;' id='scale-value' min='0.01' max='50' step='0.01'>
-					<div> Size | 
-						<label for='size-x' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>X</label>
-						<input type='number' style='margin: 4px; width: 45px;' id='size-x' min='-50' max='50' step='0.01'>
-						<label for='size-y' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Y</label>
-						<input type='number' style='margin: 4px; width: 45px;' id='size-y' min='-50' max='50' step='0.01'>
-						<label for='size-z' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Z</label>
-						<input type='number' style='margin: 4px; width: 45px;' id='size-z' min='-50' max='50' step='0.01'>
-					</div>
-					<div> Pos |
-						<label for='pos-x' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>X</label>
-						<input type='number' style='margin: 4px; width: 45px;' id='pos-x' min='-50' max='50' step='0.01'>
-						<label for='pos-y' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Y</label>
-						<input type='number' style='margin: 4px; width: 45px;' id='pos-y' min='-50' max='50' step='0.01'>
-						<label for='pos-z' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Z</label>
-						<input type='number' style='margin: 4px; width: 45px;' id='pos-z' min='-50' max='50' step='0.01'>
-					</div>
-				</div>
-			</span>
-
-			<span class='part'>
-				<select id='part-selection-list' style='width: 100%'></select> 
-
-				<div style='margin-top:3px'>
-					<label for='opacity-value' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Opacity level</label>
-					<input type='number' style='margin: 3px; width: 45px;' id='opacity-value' min='0' max='1' step='0.01'>
-				</div>
-
-				<div style="margin-top: 3px">
-					<label for='roughness-value' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Roughness level</label>
-					<input type='number' style='margin: 3px; width: 45px;' id='roughness-value' min='0' max='1' step='0.01'>	
-				</div>
-
-				<div style="margin-top: 3px"></div>
-					<label for='metalness-value' style='font-family:Arial, Helvetica, sans-serif; font-size:14px'>Metalness level</label>
-					<input type='number' style='margin: 3px; width: 45px;' id='metalness-value' min='0' max='1' step='0.01'>
-				</div>
-
 				<span class='picker' 
 					acp-color='#EFE9E7'>
 				</span>

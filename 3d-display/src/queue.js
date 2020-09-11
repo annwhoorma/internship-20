@@ -17,11 +17,5 @@ export class Queue {
     } 
     isEmpty() {
         return this.items.length == 0; 
-    } 
-    printQueue() {
-        var str = ""; 
-        for(var i = 0; i < this.items.length; i++) 
-            str += this.items[i] +" "; 
-        return str; 
-    } 
+    }
 } 
