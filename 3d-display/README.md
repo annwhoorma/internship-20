@@ -6,7 +6,7 @@ To install dependencies and run the application:
 
 ```
 npm install
-npm run start
+npm run dev
 ```
 
 #### Testing
